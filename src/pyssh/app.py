@@ -9,7 +9,7 @@ import threading
 import time
 from types import TracebackType
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QCoreApplication, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pyssh import __version__, config, strings
@@ -80,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
     install_excepthooks(str(paths.log_file))
     log.info("starting %s %s", config.APP_NAME, __version__)
 
+    if config.IS_MAC:
+        # Must precede QApplication: Ctrl = physical Control, Meta = Command (SPEC §8.3.1).
+        QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_MacDontSwapCtrlAndMeta, True)
     app = QApplication.instance() or QApplication([sys.argv[0]])
     app.setApplicationName(config.APP_NAME)
     app.setOrganizationName(config.APP_ORG)
@@ -109,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     window.show()
     startup_ms = (time.perf_counter() - started) * 1000 - dialog_ms
     log.info("startup startup_ms=%d", round(startup_ms))
+    if args.demo:
+        window.open_demo_tab()
     if db_warning:
         QTimer.singleShot(0, lambda: QMessageBox.warning(window, strings.WARNING_TITLE, db_warning))
     try:

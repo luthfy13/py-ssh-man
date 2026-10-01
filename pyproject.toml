@@ -37,6 +37,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# Intentional characters: "×" (cols×rows in the UI), "–" (ranges in docs), "´" (keyboard tests).
+allowed-confusables = ["×", "–", "´"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

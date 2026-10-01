@@ -12,3 +12,6 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   lebih baru), penyimpanan sesi, pengaturan `settings.json`, log berputar, `--version`.
 - Fase 2: vault master password (scrypt + AES-256-GCM), penyimpanan secret terenkripsi, dialog
   buat/buka/ganti/reset master password, status vault di menu dan status bar.
+- Fase 3: emulator terminal (pyte + scrollback), widget terminal (render, keyboard lintas
+  platform, seleksi, clipboard, bracketed paste, zoom, backpressure), tabel shortcut per platform,
+  mode `--demo` dengan key inspector, benchmark emulator.

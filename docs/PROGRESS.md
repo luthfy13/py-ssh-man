@@ -206,3 +206,105 @@ muncul; password salah → "Master password salah."; password benar → jendela 
 ### Masalah yang diketahui
 - Di mode `QT_QPA_PLATFORM=offscreen` Qt mencetak "This plugin does not support
   propagateSizeHints()" saat dialog ditampilkan; ini pesan plugin offscreen, bukan error aplikasi.
+
+## Fase 3 — Terminal Offline — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, `QT_QPA_PLATFORM=offscreen`), Python 3.12.3,
+PySide6 6.11.2, pyte 0.8.2
+
+### Verifikasi API (Lampiran B) terhadap versi terpasang
+- pyte 0.8.2: atribut `buffer`, `cursor` (`hidden`), `margins`, `mode`, `title`, `dirty` ada;
+  `Screen.index()` membuang baris teratas dengan me-*rebind* `buffer[y]` (aman untuk disimpan di
+  scrollback); `report_device_status`/`report_device_attributes` memanggil `write_process_input`
+  (DSR → `ESC[1;1R`, DA → `ESC[?6c`); private mode digeser `<< 5`; `resize(lines, columns)`;
+  `ByteStream` memakai incremental UTF-8 decoder; SGR 33 → `"brown"`; 256/truecolor → hex 6 digit
+  huruf kecil; karakter lebar → sel berikutnya `data == ""`.
+- **`pyte.modes` tidak punya konstanta `DECCKM`** → dipakai konstanta sendiri sesuai §8.1.1.
+- **Bug pyte 0.8.2: `graphics.BG_AIXTERM[105] == "bfightmagenta"`** (salah ketik). Tanpa
+  penanganan, latar SGR 105 tampil sebagai warna default (terlihat di screenshot uji). Ditambahkan
+  alias di `ANSI_NAME_TO_INDEX`; `test_every_pyte_color_name_is_known` memastikan semua nama warna
+  pyte dikenali.
+- `FG_BG_256[196] == FG_BG_256[9] == "ff0000"` — dicatat untuk pemetaan 16 warna (SHOULD, Fase 8).
+- PySide6 6.11.2: `Qt.Key` adalah `IntEnum`; `Qt.KeyboardModifier` adalah `Flag` (bukan int);
+  `QKeyEvent.key()` mengembalikan `int`; `AA_MacDontSwapCtrlAndMeta` tersedia.
+
+### Yang dikerjakan
+- 3.1 `terminal/colors.py`: `Theme`, `ANSI_NAME_TO_INDEX`, `resolve_color()`.
+- 3.2 `shortcuts.py`: tabel Windows/Linux dan macOS (kode dasar + hasil Shift), `match()`,
+  `is_app_shortcut()`, `zoom_wheel_modifier()`.
+- 3.3 `terminal/keymap.py`: `key_to_bytes()` urutan §8.3.5 (shortcut → Meta → Shift+PgUp/PgDn →
+  tombol khusus → AltGr → Ctrl → Alt → teks). `app.py`: `AA_MacDontSwapCtrlAndMeta` sebelum
+  `QApplication` di macOS.
+- 3.4 `terminal/emulator.py`: `_ScrollbackScreen` + `TerminalEmulator` sesuai API §8.1.3.
+- 3.5 `terminal/widget.py`: font per platform, render per *run*, pump 16 KiB/≤ 8 ms, repaint
+  coalescing 16 ms, backpressure 4 MiB/1 MiB, keyboard + ShortcutOverride, IME, seleksi
+  (drag, double-click kata), clipboard, bracketed paste, menu konteks, wheel (notch & pixel),
+  zoom 6–32, resize debounce 120 ms, instrumentasi `PYSSH_DEBUG_PERF=1`.
+- 3.6 `terminal/view.py`: widget + scrollbar tersinkron (`blockSignals`).
+- 3.7 `terminal/demo_backend.py` + key inspector; `tools/make_ansi_demo.py` →
+  `resources/ansi_demo.txt`.
+- 3.8 `MainWindow.open_demo_tab()`, `QTabWidget`, label `cols×rows`, menu Sesi/Tampilan dengan
+  QAction yang shortcut-nya dibangun dari `shortcuts.py` (teks tabel + setiap varian kode tombol).
+- 3.9 `tools/bench_emulator.py`.
+- 3.10 Test: `test_colors`, `test_shortcuts`, `test_keymap`, `test_emulator`, `test_widget`, ditambah
+  `test_demo_backend` dan test tab di `test_main_window`.
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 472 lulus, 0 gagal |
+| pytest (integration) | dilewati — belum ada test integrasi (Fase 4) |
+| Coverage modul target | emulator 100 %, keymap 100 %, colors 100 %, shortcuts 100 % (widget 97 %) |
+
+### Kriteria penerimaan
+- [x] AC-3.1 Quality Gate lulus; coverage modul target ≥ 85 %.
+- [x] AC-3.2 `test_keymap.py` = 126 kasus (Windows/Linux dan macOS); `test_emulator.py` mencakup
+  semua kasus §10.2 (teks, SGR 31, 256-color, DECCKM, bracketed paste, DSR, scrollback penuh
+  100/10/50, scroll region parsial, resize, karakter lebar, UTF-8 terpotong, `text_between`).
+- [x] AC-3.3 `python tools/bench_emulator.py`: 5,0 MB dalam 6,75 s → **0,740 MB/s** (target
+  informatif ≥ 0,3 MB/s).
+
+Verifikasi visual tanpa layar: `python -m pyssh --demo` dirender ke PNG lalu diperiksa — 16 warna
+fg/bg, grid 256, gradasi truecolor, atribut teks, box drawing tersambung, `漢字` dua kolom, key
+inspector (`\x1b` cyan + `[A`), status bar `130×38`.
+
+### Checklist manual (diisi user, jalankan `python -m pyssh --demo`)
+- [ ] MT-3.1 16 warna fg/bg, grid 256 warna, dan gradasi truecolor tampil benar. — OS: — hasil:
+- [ ] MT-3.2 Bold, italic, underline, reverse, strikethrough tampil benar. — OS: — hasil:
+- [ ] MT-3.3 Box drawing tersambung tanpa celah; `漢字` menempati 2 kolom per karakter; teks Bahasa
+  Indonesia benar. — OS: — hasil:
+- [ ] MT-3.4 Key inspector: tekan Up/Down/Left/Right (`\x1b[A` … `\x1b[D`), Home/End
+  (`\x1b[H`/`\x1b[F`), F1–F12 (`\x1bOP` … `\x1b[24~`), Ctrl+A (`\x01`), Ctrl+C (`\x03`), Alt+x
+  (`\x1bx`), Shift+Tab (`\x1b[Z`). macOS: Ctrl+C → `\x03`; Option+e menghasilkan karakter aksen
+  (atau `\x1be` bila "Option sebagai Meta" aktif, Fase 8). — OS: — hasil:
+- [ ] MT-3.5 Ubah ukuran jendela → status bar menampilkan `cols×rows` baru; tampilan tidak rusak.
+  — OS: — hasil:
+- [ ] MT-3.6 Wheel dan Shift+PageUp menampilkan scrollback; mengetik apa saja kembali ke bawah.
+  — OS: — hasil:
+- [ ] MT-3.7 Drag seleksi → tempel di editor teks lain sama persis; klik kanan → menu konteks
+  (Salin/Tempel/Bersihkan Scrollback) berfungsi. — OS: — hasil:
+- [ ] MT-3.8 Ctrl+wheel (Cmd+wheel di macOS) mengubah ukuran font (batas 6–32); grid menyesuaikan.
+  — OS: — hasil:
+
+### Penyimpangan & keputusan
+- `key_to_bytes()` mengikuti urutan §8.3.5 secara harfiah: Ctrl+Shift+C/V (shortcut *widget*)
+  menghasilkan `\x03`/`\x16` bila dipanggil langsung; `keyPressEvent` mencegatnya lebih dulu
+  (§8.4.5 langkah 2), sehingga tidak pernah terkirim.
+- Ctrl+? (`Key_Question`) → `\x7f` sesuai tabel §8.3.4 (catatan §8.3.4 menyebut pasangan
+  `Key_Slash`/`Key_Question`, tetapi tabel memetakan keduanya ke byte berbeda; tabel diikuti).
+- `TerminalEmulator.scrolled_total` (penghitung baris yang pernah masuk scrollback) ditambahkan agar
+  tampilan yang sedang di-scroll ke atas tetap diam walau scrollback sudah penuh.
+- Tiap QAction mendapat beberapa `QKeySequence`: teks dari tabel ditambah kombinasi untuk setiap
+  kode tombol (`Key_Equal`/`Key_Plus`, dst.), agar cocok dengan apa pun yang dilaporkan Qt.
+- `ruff`: `allowed-confusables = ["×", "–", "´"]` ditambahkan di `pyproject.toml` (karakter
+  disengaja: format `cols×rows` di UI, rentang di dokumentasi, karakter Option di test macOS).
+- Triple-click (COULD) dan primary selection Linux (COULD, Fase 8) belum dibuat.
+- `write_local(text, color)` menerima nama warna ANSI (`"red"`, `"yellow"`, `"cyan"`, …).
+- Demo memakai teks hitam pada latar terang agar nomor warna terbaca.
+
+### Masalah yang diketahui
+- Perilaku keyboard nyata (AltGr Windows, Option/Cmd macOS, IME, Wayland) hanya bisa dipastikan
+  lewat MT-3.4 dan MT-9.x; test otomatis memakai event sintetis.

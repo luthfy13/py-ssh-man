@@ -85,3 +85,25 @@ ACTION_VAULT_CHANGE = "Ganti Master Password…"
 ACTION_VAULT_RESET = "Reset Data Login…"
 ACTION_SETTINGS = "Pengaturan…"
 ACTION_QUIT = "Keluar"
+
+# --- Terminal widget ---
+TERMINAL_COPY = "Salin"
+TERMINAL_PASTE = "Tempel"
+TERMINAL_CLEAR_SCROLLBACK = "Bersihkan Scrollback"
+GRID_SIZE = "{cols}×{rows}"
+
+# --- Demo ---
+DEMO_TAB_TITLE = "Demo"
+DEMO_INSPECTOR_HEADER = (
+    "Key inspector: tekan tombol apa saja; byte non-printable ditampilkan sebagai \\xNN."
+)
+
+# --- Menus: session and view ---
+ACTION_RECONNECT = "Hubungkan Ulang"
+ACTION_CLOSE_TAB = "Tutup Tab"
+ACTION_NEXT_TAB = "Tab Berikutnya"
+ACTION_PREV_TAB = "Tab Sebelumnya"
+ACTION_ZOOM_IN = "Perbesar"
+ACTION_ZOOM_OUT = "Perkecil"
+ACTION_ZOOM_RESET = "Ukuran Normal"
+ACTION_TOGGLE_PANEL = "Panel Sesi"
