@@ -129,3 +129,80 @@ Laporan per fase sesuai template SPEC §11.13.
 
 ### Masalah yang diketahui
 - Tidak ada.
+
+## Fase 2 — Vault & Enkripsi — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, tanpa layar), Python 3.12.3, cryptography 50.0.2
+
+### Yang dikerjakan
+- 2.1 `core/crypto.py`: `KdfParams` (default N=2¹⁷, r=8, p=1), `derive_key` (NFC → UTF-8 → scrypt
+  32 byte), `new_salt`, `new_key`, `encrypt` (AES-256-GCM, nonce acak 12 byte), `decrypt`
+  (`InvalidTag`/`ValueError` → `DecryptError`).
+- 2.2 `core/vault.py`: state UNINITIALIZED/LOCKED/UNLOCKED; `initialize`, `unlock` (parameter KDF dari
+  tabel `vault`, log `unlock_ms`), `lock`, `change_master_password` (salt baru + KDF default terbaru,
+  satu transaksi), `reset` (satu transaksi), `encrypt_secret`/`decrypt_secret` dengan AAD
+  `b"pyssh/secret/v1/" + session_id`; DEK dibungkus dengan AAD `b"pyssh/dek/v1"`.
+- 2.3 `core/secret_store.py`: `can_store`, `get_secret`, `set_secret` (INSERT OR REPLACE +
+  `remember_secret = 1`), `delete_secret`, `has_secret`.
+- 2.4 `ui/vault_dialogs.py`: `CreateMasterPasswordDialog`, `UnlockDialog` (Lewati/Batal, tautan
+  "Lupa master password?"), `ChangeMasterPasswordDialog`, konfirmasi reset, `ensure_vault_unlocked()`;
+  kursor tunggu (`ui/dialogs.py: wait_cursor`) selama scrypt.
+- 2.5 `AppServices` + `vault` & `secret_store`; startup langkah 6: vault LOCKED → `UnlockDialog`
+  (mode startup); waktu dialog dikurangkan dari `startup_ms`; vault dikunci saat aplikasi selesai.
+- 2.6 Menu Berkas (Buat/Buka/Kunci/Ganti/Reset sesuai state, Keluar dengan `QuitRole`), label status
+  "Vault: …", `refresh_vault_ui()`.
+- 2.7 Test: `test_crypto`, `test_vault`, `test_secret_store`, `test_vault_dialogs`, ditambah
+  `test_main_window` (menu vault) dan test startup di `test_app`. Fixture `fast_kdf` dan `services`
+  ditambahkan ke `tests/conftest.py`.
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 195 lulus, 0 gagal |
+| pytest (integration) | dilewati — belum ada test integrasi (Fase 4) |
+| Coverage modul target | crypto 100 %, vault 98 %, secret_store 100 % (vault_dialogs 99 %) |
+
+### Kriteria penerimaan
+- [x] AC-2.1 Quality Gate lulus; coverage `core/crypto`, `core/vault`, `core/secret_store` ≥ 95 %.
+- [x] AC-2.2 `test_raw_database_file_contains_no_plaintext`: bytes mentah `pyssh.db` tidak memuat
+  secret uji (UTF-8 maupun UTF-16-LE).
+- [x] AC-2.3 KDF default (scrypt N=131072, r=8, p=1) di mesin dev: `unlock_ms` = 398, 401, 379 ms
+  (berhasil) dan 376 ms (password salah); lewat dialog startup sungguhan: 783 ms (salah) dan 378 ms
+  (benar). Semua dalam rentang 200–2000 ms.
+- [x] AC-2.4 `test_log_contains_no_secrets`: setelah initialize/unlock salah/unlock benar/ganti
+  password dengan log level DEBUG, file log tidak memuat master password, secret, DEK, nonce, atau
+  ciphertext (teks maupun hex/bytes mentah).
+
+Verifikasi tambahan tanpa layar (aplikasi sungguhan, tanpa monkeypatch): vault LOCKED → dialog startup
+muncul; password salah → "Master password salah."; password benar → jendela utama tampil dengan
+"Vault: terbuka"; tombol "Lewati" → jendela utama tampil dengan "Vault: terkunci".
+
+### Checklist manual (diisi user)
+- [ ] MT-2.1 Berkas → Buat Master Password → restart → dialog buka vault muncul; password salah
+  menampilkan error; password benar membuka; status bar "Vault: terbuka". — OS: — hasil:
+- [ ] MT-2.2 Pilih **Lewati** saat startup → status "Vault: terkunci"; Berkas → Buka Vault berfungsi.
+  — OS: — hasil:
+- [ ] MT-2.3 Berkas → Ganti Master Password → restart → password baru berhasil, password lama gagal.
+  — OS: — hasil:
+- [ ] MT-2.4 Di dialog buka vault klik "Lupa master password?" → konfirmasi "Hapus Data Login" →
+  status "Vault: belum dibuat" (dialog buat master password langsung ditawarkan bila dibuka lewat
+  alur yang membutuhkan vault). — OS: — hasil:
+
+### Penyimpangan & keputusan
+- `Vault.add_listener()` ditambahkan (tanpa Qt) agar setiap perubahan state, dari mana pun asalnya
+  (menu, `SessionDialog`, `TerminalTab`), memanggil `MainWindow.refresh_vault_ui()` (§9.3).
+- `Vault.unlock()` pada vault UNINITIALIZED mengembalikan `False`.
+- `change_master_password()` yang berhasil membiarkan vault dalam state UNLOCKED (DEK sudah terbuka
+  untuk membungkus ulang), termasuk bila sebelumnya LOCKED.
+- `ensure_vault_unlocked()`: bila user mereset vault dari `UnlockDialog`, dialog pembuatan master
+  password langsung menyusul (alternatifnya mengembalikan `False`, yang membuat secret tidak tersimpan).
+- Menu "Reset Data Login…" dan "Ganti Master Password…" hanya terlihat bila vault sudah dibuat.
+- `SecretStore.set_secret()` melempar `KeyError` bila sesi tidak ada (sebelum insert).
+- Item menu Sesi Baru (Fase 5) dan Pengaturan (Fase 8) ditambahkan di fase masing-masing.
+
+### Masalah yang diketahui
+- Di mode `QT_QPA_PLATFORM=offscreen` Qt mencetak "This plugin does not support
+  propagateSizeHints()" saat dialog ditampilkan; ini pesan plugin offscreen, bukan error aplikasi.

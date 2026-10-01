@@ -34,8 +34,8 @@ def test_version() -> None:
     assert pyssh.__version__ == "0.1.0"
 
 
-def test_main_window_created(qtbot) -> None:
-    window = MainWindow()
+def test_main_window_created(qtbot, services) -> None:
+    window = MainWindow(services)
     qtbot.addWidget(window)
     window.show()
     qtbot.waitExposed(window)

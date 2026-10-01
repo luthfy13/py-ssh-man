@@ -8,8 +8,10 @@ from typing import Any
 
 from pyssh.config import AppPaths
 from pyssh.core.database import Database
+from pyssh.core.secret_store import SecretStore
 from pyssh.core.session_store import SessionStore
 from pyssh.core.settings_store import SettingsStore
+from pyssh.core.vault import Vault
 
 
 @dataclass
@@ -23,4 +25,6 @@ class AppServices:
     database: Database
     session_store: SessionStore
     settings_store: SettingsStore
+    vault: Vault
+    secret_store: SecretStore
     worker_factory: Callable[..., Any] | None = None

@@ -10,3 +10,5 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   dokumen `docs/SPEC.md` (v2.1) serta `docs/PROGRESS.md`.
 - Fase 1: lokasi folder data per OS, database SQLite (skema v1, penanganan file rusak dan versi
   lebih baru), penyimpanan sesi, pengaturan `settings.json`, log berputar, `--version`.
+- Fase 2: vault master password (scrypt + AES-256-GCM), penyimpanan secret terenkripsi, dialog
+  buat/buka/ganti/reset master password, status vault di menu dan status bar.

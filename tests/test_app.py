@@ -90,3 +90,29 @@ def test_excepthook_logs_and_shows_message(
     t.start()
     t.join()
     assert len(shown) == 1  # worker threads only log
+
+
+def test_locked_vault_shows_unlock_dialog_at_startup(
+    qapp, pyssh_home: Path, fast_kdf, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyssh.core.database import Database
+    from pyssh.core.vault import Vault
+    from pyssh.ui.vault_dialogs import UnlockDialog
+
+    db = Database(pyssh_home / "pyssh.db")
+    db.open()
+    Vault(db, fast_kdf).initialize("master-pass-1")
+    db.close()
+
+    seen: list[str] = []
+
+    def skip(dialog: UnlockDialog) -> int:
+        seen.append(dialog.reject_button.text())
+        return 0
+
+    monkeypatch.setattr(UnlockDialog, "exec", skip)
+    _close_windows_soon()
+    assert app_module.main([]) == 0
+    assert seen == ["Lewati"]
+    log_text = (pyssh_home / "logs" / "pyssh.log").read_text(encoding="utf-8")
+    assert "startup startup_ms=" in log_text

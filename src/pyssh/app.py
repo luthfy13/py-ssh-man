@@ -14,11 +14,14 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pyssh import __version__, config, strings
 from pyssh.core.database import SCHEMA_VERSION, Database, DatabaseVersionError
+from pyssh.core.secret_store import SecretStore
 from pyssh.core.session_store import SessionStore
 from pyssh.core.settings_store import SettingsStore
+from pyssh.core.vault import Vault, VaultState
 from pyssh.logging_setup import setup_logging
 from pyssh.services import AppServices
 from pyssh.ui.main_window import MainWindow
+from pyssh.ui.vault_dialogs import UnlockDialog
 
 log = logging.getLogger(__name__)
 
@@ -95,21 +98,36 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_DB_VERSION
 
-    settings_store = SettingsStore(paths.settings_file)
-    settings_store.load()
-    services = AppServices(
-        paths=paths,
-        database=database,
-        session_store=SessionStore(database),
-        settings_store=settings_store,
-    )
+    services = build_services(paths, database)
+    dialog_ms = 0.0
+    if services.vault.state is VaultState.LOCKED:
+        dialog_started = time.perf_counter()
+        UnlockDialog(services.vault, startup=True).exec()
+        dialog_ms = (time.perf_counter() - dialog_started) * 1000
 
     window = MainWindow(services)
     window.show()
-    log.info("startup startup_ms=%d", round((time.perf_counter() - started) * 1000))
+    startup_ms = (time.perf_counter() - started) * 1000 - dialog_ms
+    log.info("startup startup_ms=%d", round(startup_ms))
     if db_warning:
         QTimer.singleShot(0, lambda: QMessageBox.warning(window, strings.WARNING_TITLE, db_warning))
     try:
         return app.exec()
     finally:
+        services.vault.lock()
         database.close()
+
+
+def build_services(paths: config.AppPaths, database: Database) -> AppServices:
+    """Create stores and the vault on an opened database (SPEC §9.2 step 5)."""
+    settings_store = SettingsStore(paths.settings_file)
+    settings_store.load()
+    vault = Vault(database)
+    return AppServices(
+        paths=paths,
+        database=database,
+        session_store=SessionStore(database),
+        settings_store=settings_store,
+        vault=vault,
+        secret_store=SecretStore(database, vault),
+    )
