@@ -19,6 +19,8 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   error, tab terminal dengan state, banner reconnect, `--connect user@host[:port]`.
 - Fase 5: panel sesi (cari, buat, edit, duplikat, hapus, lupakan host key), dialog sesi dengan
   penyimpanan password/passphrase terenkripsi, halaman sambutan, posisi jendela tersimpan.
+- Fase 6: banyak tab dengan judul unik dan ikon status, konfirmasi tutup tab/aplikasi, klik tengah
+  menutup tab, penutupan aplikasi menghentikan semua sesi dan mengunci vault.
 
 ### Diperbaiki
 - Alasan terputus kadang salah ("Koneksi terputus.") karena OpenSSH mengirim EOF sebelum

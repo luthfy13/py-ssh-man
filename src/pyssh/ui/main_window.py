@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import replace
 
-from PySide6.QtCore import QByteArray, QKeyCombination, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import QByteArray, QEvent, QKeyCombination, QObject, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
@@ -23,8 +24,10 @@ from pyssh.services import AppServices
 from pyssh.terminal.demo_backend import DemoBackend
 from pyssh.terminal.view import TerminalView
 from pyssh.terminal.widget import TerminalWidget
+from pyssh.ui import icons
+from pyssh.ui.dialogs import confirm
 from pyssh.ui.session_panel import SessionPanel
-from pyssh.ui.terminal_tab import TerminalTab
+from pyssh.ui.terminal_tab import TabState, TerminalTab
 from pyssh.ui.vault_dialogs import (
     ChangeMasterPasswordDialog,
     CreateMasterPasswordDialog,
@@ -35,12 +38,32 @@ from pyssh.ui.vault_dialogs import (
 INITIAL_WIDTH = 1200
 INITIAL_HEIGHT = 750
 PANEL_WIDTH = 240
+SHUTDOWN_JOIN_S = 1.5
+
+STATE_ICON_COLOR = {
+    TabState.IDLE: icons.GRAY,
+    TabState.CONNECTING: icons.YELLOW,
+    TabState.CONNECTED: icons.GREEN,
+    TabState.DISCONNECTED: icons.RED,
+    TabState.FAILED: icons.RED,
+    TabState.CLOSED: icons.GRAY,
+}
 
 _VAULT_STATE_TEXT = {
     VaultState.UNINITIALIZED: strings.VAULT_STATE_UNINITIALIZED,
     VaultState.LOCKED: strings.VAULT_STATE_LOCKED,
     VaultState.UNLOCKED: strings.VAULT_STATE_UNLOCKED,
 }
+
+
+def unique_title(name: str, existing: list[str]) -> str:
+    """``name``, or ``name (2)``, ``name (3)``… when already used by an open tab."""
+    if name not in existing:
+        return name
+    n = 2
+    while f"{name} ({n})" in existing:
+        n += 1
+    return f"{name} ({n})"
 
 
 def key_sequences(action: str, *, mac: bool = config.IS_MAC) -> list[QKeySequence]:
@@ -69,8 +92,9 @@ class MainWindow(QMainWindow):
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
-        self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.tabCloseRequested.connect(self.request_close_tab)
         self.tabs.currentChanged.connect(self._on_current_tab_changed)
+        self.tabs.tabBar().installEventFilter(self)
 
         self.welcome = QLabel(
             strings.WELCOME.format(
@@ -95,7 +119,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
 
         self._build_menus()
+        self.state_icon = QLabel()
         self.state_label = QLabel()
+        self.statusBar().addWidget(self.state_icon)
         self.statusBar().addWidget(self.state_label, 1)
         self.vault_label = QLabel()
         self.grid_label = QLabel()
@@ -255,18 +281,40 @@ class MainWindow(QMainWindow):
         if tab is not None:
             tab.reconnect()
 
+    def terminal_tabs(self) -> list[TerminalTab]:
+        """All open SSH tabs."""
+        return [
+            widget
+            for i in range(self.tabs.count())
+            if isinstance(widget := self.tabs.widget(i), TerminalTab)
+        ]
+
     def _open_terminal_tab(self, session: SessionConfig, *, adhoc: bool) -> TerminalTab:
         tab = TerminalTab(session, self._services, adhoc=adhoc)
         tab.state_changed.connect(lambda _state, t=tab: self._on_tab_state(t))
-        tab.close_requested.connect(lambda t=tab: self.close_tab(self.tabs.indexOf(t)))
+        tab.close_requested.connect(lambda t=tab: self.request_close_tab(self.tabs.indexOf(t)))
         tab.info_message.connect(lambda text: self.statusBar().showMessage(text, 10000))
-        self._add_terminal_tab(tab, session.name)
+        titles = [self.tabs.tabText(i) for i in range(self.tabs.count())]
+        index = self._add_terminal_tab(tab, unique_title(session.name, titles))
+        self.tabs.setTabToolTip(index, session.target())
+        self._on_tab_state(tab)
         tab.connect_session()
         return tab
 
     def _on_tab_state(self, tab: TerminalTab) -> None:
+        index = self.tabs.indexOf(tab)
+        if index >= 0:
+            self.tabs.setTabIcon(index, icons.dot_icon(STATE_ICON_COLOR[tab.state]))
         if tab is self.active_tab():
-            self.state_label.setText(tab.status_text())
+            self._show_tab_status(tab)
+
+    def _show_tab_status(self, tab: TerminalTab | None) -> None:
+        if tab is None:
+            self.state_icon.clear()
+            self.state_label.clear()
+            return
+        self.state_icon.setPixmap(icons.dot_icon(STATE_ICON_COLOR[tab.state]).pixmap(12, 12))
+        self.state_label.setText(tab.status_text())
 
     def _add_terminal_tab(self, view: QWidget, title: str) -> int:
         terminal = getattr(view, "terminal", None)
@@ -290,8 +338,22 @@ class MainWindow(QMainWindow):
         if terminal is not None:
             method(terminal)
 
+    def request_close_tab(self, index: int) -> None:
+        """Close a tab, asking first when its session is connected (SPEC §9.7, §9.9)."""
+        widget = self.tabs.widget(index)
+        if widget is None:
+            return
+        needs_confirm = (
+            isinstance(widget, TerminalTab)
+            and widget.state is TabState.CONNECTED
+            and self._services.settings_store.current.confirm_on_close
+        )
+        if needs_confirm and not confirm(self, strings.CLOSE_TAB_TITLE, strings.CLOSE_TAB_CONFIRM):
+            return
+        self.close_tab(index)
+
     def close_tab(self, index: int) -> None:
-        """Close the tab at ``index``."""
+        """Close the tab at ``index`` without asking; the worker is stopped, not awaited."""
         widget = self.tabs.widget(index)
         if widget is None:
             return
@@ -302,9 +364,23 @@ class MainWindow(QMainWindow):
         self._update_content()
 
     def close_current_tab(self) -> None:
-        """Close the active tab."""
+        """Close the active tab (with confirmation when connected)."""
         if self.tabs.count():
-            self.close_tab(self.tabs.currentIndex())
+            self.request_close_tab(self.tabs.currentIndex())
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Middle click on a tab closes it."""
+        if (
+            watched is self.tabs.tabBar()
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and isinstance(event, QMouseEvent)
+            and event.button() == Qt.MouseButton.MiddleButton
+        ):
+            index = self.tabs.tabBar().tabAt(event.position().toPoint())
+            if index >= 0:
+                self.request_close_tab(index)
+                return True
+        return super().eventFilter(watched, event)
 
     def next_tab(self) -> None:
         """Activate the next tab (wraps around)."""
@@ -327,8 +403,7 @@ class MainWindow(QMainWindow):
             self.grid_label.clear()
         else:
             self._show_grid(*terminal.grid_size())
-        tab = self.active_tab()
-        self.state_label.setText(tab.status_text() if tab is not None else "")
+        self._show_tab_status(self.active_tab())
 
     def _on_grid_size(self, terminal: TerminalWidget, cols: int, rows: int) -> None:
         if terminal is self.active_terminal():
@@ -370,6 +445,24 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Save the window state (session shutdown is added in Phase 6)."""
+        """Confirm, save the window state, stop every session, lock the vault (SPEC §9.9)."""
+        tabs = self.terminal_tabs()
+        active = sum(1 for tab in tabs if tab.state is TabState.CONNECTED)
+        if (
+            active
+            and self._services.settings_store.current.confirm_on_close
+            and not confirm(
+                self, strings.QUIT_TITLE, strings.QUIT_CONFIRM.format(n=active, app=config.APP_NAME)
+            )
+        ):
+            event.ignore()
+            return
         self.save_window_state()
-        super().closeEvent(event)
+        for tab in tabs:
+            tab.close_session()
+        deadline = time.monotonic() + SHUTDOWN_JOIN_S
+        for tab in tabs:
+            tab.join_workers(max(0.0, deadline - time.monotonic()))
+        self._services.vault.lock()
+        self._services.database.close()
+        event.accept()

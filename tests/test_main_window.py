@@ -18,7 +18,20 @@ MASTER = "master-pass-1"
 
 
 @pytest.fixture
-def window(qtbot, services) -> MainWindow:
+def confirms(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Answer every confirmation with Yes (modal boxes would block) and record the texts."""
+    asked: list[str] = []
+
+    def fake_confirm(parent, title: str, text: str) -> bool:
+        asked.append(text)
+        return True
+
+    monkeypatch.setattr(main_window_module, "confirm", fake_confirm)
+    return asked
+
+
+@pytest.fixture
+def window(qtbot, services, confirms) -> MainWindow:
     w = MainWindow(services)
     qtbot.addWidget(w)
     return w
@@ -270,7 +283,7 @@ def test_new_session_action_and_panel_toggle(
     assert window.session_panel.isVisible()
 
 
-def test_geometry_saved_and_restored(services, qtbot) -> None:
+def test_geometry_saved_and_restored(services, qtbot, confirms) -> None:
     first = MainWindow(services)
     qtbot.addWidget(first)
     first.resize(700, 500)  # must fit the offscreen screen (800x800); Qt clamps otherwise
@@ -278,6 +291,7 @@ def test_geometry_saved_and_restored(services, qtbot) -> None:
     qtbot.waitExposed(first)
     first.splitter.setSizes([300, 400])
     first.close()
+    services.database.open()  # closeEvent closed it (SPEC §9.9)
     saved = services.settings_store.current
     assert saved.window_geometry and saved.window_state and saved.splitter_state
     reloaded = services.settings_store.load()
@@ -288,3 +302,130 @@ def test_geometry_saved_and_restored(services, qtbot) -> None:
     qtbot.waitExposed(second)
     assert second.size() == first.size()
     assert second.splitter.sizes()[0] == first.splitter.sizes()[0]
+
+
+def test_unique_title() -> None:
+    from pyssh.ui.main_window import unique_title
+
+    assert unique_title("Web", []) == "Web"
+    assert unique_title("Web", ["Web"]) == "Web (2)"
+    assert unique_title("Web", ["Web", "Web (2)"]) == "Web (3)"
+    assert unique_title("Web", ["Web (2)"]) == "Web"
+
+
+def test_three_tabs_unique_titles_and_icons(
+    window: MainWindow, services, fake_workers, password_answer
+) -> None:
+    from pyssh.models import SessionConfig
+    from pyssh.ui import icons
+
+    session = SessionConfig(name="Web", host="h", username="u", port=2200)
+    services.session_store.add(session)
+    for _ in range(3):
+        window.open_session(session)
+    titles = [window.tabs.tabText(i) for i in range(3)]
+    assert titles == ["Web", "Web (2)", "Web (3)"]
+    assert window.tabs.tabToolTip(1) == "u@h:2200"
+    yellow = icons.dot_icon(icons.YELLOW).cacheKey()
+    assert window.tabs.tabIcon(0).cacheKey() == yellow
+    fake_workers.workers[0].connected.emit()
+    assert window.tabs.tabIcon(0).cacheKey() == icons.dot_icon(icons.GREEN).cacheKey()
+    fake_workers.workers[0].disconnected.emit("x")
+    assert window.tabs.tabIcon(0).cacheKey() == icons.dot_icon(icons.RED).cacheKey()
+    assert len(window.terminal_tabs()) == 3
+
+
+def test_status_bar_follows_active_tab(window: MainWindow, fake_workers, password_answer) -> None:
+    window.open_adhoc("a", "h1")
+    window.open_adhoc("b", "h2")
+    fake_workers.workers[0].connected.emit()
+    assert window.state_label.text() == "Menghubungkan… — b@h2:22"
+    window.tabs.setCurrentIndex(0)
+    assert window.state_label.text() == "Terhubung — a@h1:22"
+    assert window.state_icon.pixmap() is not None
+
+
+def test_close_connected_tab_asks(
+    window: MainWindow, services, fake_workers, password_answer, confirms, monkeypatch
+) -> None:
+    window.open_adhoc("u", "h")
+    window.request_close_tab(5)  # unknown index: ignored
+    fake_workers.last.connected.emit()
+    monkeypatch.setattr(main_window_module, "confirm", lambda *a: confirms.append(a[2]) or False)
+    window.action_close_tab.trigger()  # declined
+    assert window.tabs.count() == 1
+    assert confirms == [strings.CLOSE_TAB_CONFIRM]
+    monkeypatch.setattr(main_window_module, "confirm", lambda *a: confirms.append(a[2]) or True)
+    window.tabs.tabCloseRequested.emit(0)  # the tab's × button
+    assert window.tabs.count() == 0
+    assert fake_workers.last.stopped
+
+
+def test_close_without_confirmation_when_disabled(
+    window: MainWindow, services, fake_workers, password_answer, confirms
+) -> None:
+    from dataclasses import replace
+
+    services.settings_store.save(replace(services.settings_store.current, confirm_on_close=False))
+    window.open_adhoc("u", "h")
+    fake_workers.last.connected.emit()
+    window.close_current_tab()
+    assert confirms == []
+    assert window.tabs.count() == 0
+
+
+def test_disconnected_tab_closes_without_question(
+    window: MainWindow, fake_workers, password_answer, confirms
+) -> None:
+    window.open_adhoc("u", "h")
+    fake_workers.last.failed.emit("E_CONNECT", "x")
+    window.close_current_tab()
+    assert confirms == []
+
+
+def test_middle_click_closes_tab(window: MainWindow, fake_workers, password_answer, qtbot) -> None:
+    window.show()
+    qtbot.waitExposed(window)
+    window.open_adhoc("u", "h")
+    window.open_adhoc("v", "h")
+    bar = window.tabs.tabBar()
+    qtbot.mouseClick(bar, Qt.MouseButton.MiddleButton, pos=bar.tabRect(0).center())
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["v@h"]
+    qtbot.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.tabRect(0).center())
+    assert window.tabs.count() == 1
+
+
+def test_close_app_declined_keeps_running(
+    window: MainWindow, fake_workers, password_answer, confirms, monkeypatch, qtbot
+) -> None:
+    window.show()
+    window.open_adhoc("u", "h")
+    window.open_adhoc("v", "h")
+    for worker in fake_workers.workers:
+        worker.connected.emit()
+    monkeypatch.setattr(main_window_module, "confirm", lambda *a: confirms.append(a[2]) or False)
+    window.close()
+    assert window.isVisible()
+    assert confirms == ["Ada 2 sesi aktif. Keluar dari PySSH?"]
+    assert not any(w.stopped for w in fake_workers.workers)
+
+
+def test_close_app_stops_workers_and_locks_vault(
+    window: MainWindow, services, fake_workers, password_answer, confirms, qtbot
+) -> None:
+    from pyssh.core.vault import VaultState
+
+    services.vault.initialize("master-pass-1")
+    window.show()
+    for name in ("a", "b", "c"):
+        window.open_adhoc(name, "h")
+    for worker in fake_workers.workers[:2]:
+        worker.connected.emit()
+    window.close()
+    assert not window.isVisible()
+    assert confirms == ["Ada 2 sesi aktif. Keluar dari PySSH?"]
+    assert all(w.stopped and w.signalsBlocked() for w in fake_workers.workers)
+    assert services.vault.state is VaultState.LOCKED
+    with pytest.raises(RuntimeError):
+        _ = services.database.conn  # closed
+    services.database.open()  # for fixture teardown

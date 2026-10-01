@@ -473,3 +473,62 @@ keluar 0)."; tombol R → menghubungkan ulang.
 
 ### Masalah yang diketahui
 - Tidak ada.
+
+## Fase 6 — Multi-tab & Siklus Hidup — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, offscreen), Python 3.12.3; server uji `sshd` lokal
+
+### Yang dikerjakan
+- 6.1 Judul tab unik (`Nama`, `Nama (2)`, …), tooltip `user@host:port`, ikon titik status
+  (`ui/icons.py`: kuning CONNECTING, hijau CONNECTED, merah DISCONNECTED/FAILED, abu-abu lainnya),
+  ikon + teks status di kiri status bar.
+- 6.2 Banner reconnect, R/Enter, shortcut Hubungkan Ulang (sudah dari Fase 4, diuji ulang).
+- 6.3 Tutup tab lewat tombol ×, klik tengah (event filter pada tab bar), shortcut, dan tombol banner;
+  konfirmasi "Sesi masih terhubung. Tutup tab?" hanya bila CONNECTED dan `confirm_on_close`.
+- 6.4 Tab berikutnya/sebelumnya, fokus ke terminal saat pindah tab, status bar mengikuti tab aktif.
+- 6.5 `closeEvent`: konfirmasi "Ada {n} sesi aktif. Keluar dari PySSH?" (n = tab CONNECTED) →
+  simpan geometri → `close_session()` semua tab (`blockSignals` + `stop`) → `join` dengan total batas
+  1,5 s → `vault.lock()` → `database.close()`.
+- 6.6 Test: tambahan `test_main_window`, `integration/test_multi_tab`.
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 594 lulus, 0 gagal |
+| pytest (integration) | 16 lulus, 1 dilewati (audit secret butuh password unik, lihat Fase 5) |
+| Coverage | main_window 100 %, terminal_tab 95 %, icons 100 % |
+
+### Kriteria penerimaan
+- [x] AC-6.1 Quality Gate lulus.
+- [x] AC-6.2 `test_five_parallel_sessions_get_their_own_output` (5 koneksi nyata, masing-masing hanya
+  menerima hasil perintahnya sendiri) dan `test_twenty_connect_disconnect_cycles_leave_no_threads`
+  (setelah 20 siklus tidak ada thread `ssh-*` di `threading.enumerate()`) lulus.
+- [x] AC-6.3 `close_session()` pada tab dengan koneksi nyata: 0,29–0,46 ms (5 pengukuran);
+  `test_closing_connected_tab_does_not_block` memastikan < 100 ms.
+
+### Pengukuran
+| Metrik | Target | Hasil | OS |
+|---|---|---|---|
+| `close_session()` tab terhubung | < 100 ms | 0,29–0,46 ms | Ubuntu 24.04 (container) |
+| Tutup aplikasi dengan 5 sesi aktif | ≤ 2 s (MT-6.2) | 3,6 ms; thread `ssh-*` = 0 setelahnya | Ubuntu 24.04 (container) |
+
+### Checklist manual (diisi user)
+- [ ] MT-6.1 Buka 5 tab ke server berbeda/sama, jalankan `top` di semuanya; pindah tab lancar.
+  — OS: — hasil:
+- [ ] MT-6.2 Tutup aplikasi dengan 5 sesi aktif → proses keluar ≤ 2 s; tidak ada proses Python
+  PySSH tersisa (Task Manager / `ps aux | grep pyssh` / Activity Monitor). — OS: — hasil:
+- [ ] MT-6.3 Semua shortcut §8.3.2 berfungsi sesuai platform; Ctrl+C/Ctrl+D/Ctrl+W/Ctrl+R tetap
+  terkirim ke server (cek di shell: Ctrl+R memunculkan reverse-search). — OS: — hasil:
+
+### Penyimpangan & keputusan
+- "Sesi aktif" pada konfirmasi keluar dihitung dari tab berstatus CONNECTED (sama dengan aturan
+  konfirmasi tutup tab).
+- `MainWindow.request_close_tab()` (dengan konfirmasi) dipakai untuk semua jalur UI; `close_tab()`
+  menutup tanpa bertanya (dipakai `closeEvent` dan test).
+- Ikon abu-abu untuk IDLE/CLOSED (tabel §9.6.1 hanya mendefinisikan 4 state).
+
+### Masalah yang diketahui
+- Tidak ada.

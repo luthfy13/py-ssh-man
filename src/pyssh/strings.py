@@ -218,3 +218,9 @@ FORGET_NONE = "Tidak ada host key tersimpan untuk {target}."
 
 # --- Welcome page ---
 WELCOME = "Klik dua kali sebuah sesi untuk membuka, atau tekan {shortcut} untuk membuat sesi baru."
+
+# --- Closing (SPEC §9.7, §9.9) ---
+CLOSE_TAB_TITLE = "Tutup Tab"
+CLOSE_TAB_CONFIRM = "Sesi masih terhubung. Tutup tab?"
+QUIT_TITLE = "Keluar"
+QUIT_CONFIRM = "Ada {n} sesi aktif. Keluar dari {app}?"
