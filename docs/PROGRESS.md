@@ -308,3 +308,99 @@ inspector (`\x1b` cyan + `[A`), status bar `130×38`.
 ### Masalah yang diketahui
 - Perilaku keyboard nyata (AltGr Windows, Option/Cmd macOS, IME, Wayland) hanya bisa dipastikan
   lewat MT-3.4 dan MT-9.x; test otomatis memakai event sintetis.
+
+## Fase 4 — Koneksi SSH dengan Password — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, offscreen), Python 3.12.3, paramiko 5.0.0
+**Server uji:** Opsi A (Docker) tidak tersedia — daemon Docker tidak berjalan
+(`/var/run/docker.sock` tidak ada). Dipakai **Opsi C**: `openssh-server` 9.6p1 di container,
+`sshd -p 2222`, user `tester`/`secret`, key uji di `tests/keys/` (di-ignore git).
+
+### Verifikasi API (Lampiran B) terhadap paramiko 5.0.0
+- `SSHClient.connect(..., timeout, banner_timeout, auth_timeout, allow_agent, look_for_keys)`,
+  `invoke_shell(term, width, height)`, `Channel.resize_pty/recv/sendall/closed/exit_status_ready/
+  recv_exit_status/fileno`, `Transport.set_keepalive/is_active`,
+  `MissingHostKeyPolicy.missing_host_key(client, hostname, key)` — ada dengan signature sesuai.
+- `SSHClient.save_host_keys()` memuat ulang file `known_hosts` sebelum menulis (penyimpanan dari
+  beberapa tab tidak saling menimpa).
+- `Transport.stop_thread()` tidak menunggu lama setelah `packetizer.close()` → `stop()` dari GUI
+  thread tidak memblokir.
+- `NoValidConnectionsError` ⊂ `OSError`; `BadHostKeyException` ⊂ `SSHException`;
+  `PasswordRequiredException` dan `BadAuthenticationType` ⊂ `AuthenticationException`;
+  `socket.timeout is TimeoutError` → urutan §7.10 diperlukan dan diuji.
+- **`PKey.from_path(path, password=None)`** — parameternya bernama `password`, bukan `passphrase`
+  seperti tertulis di §7.8 (dipakai di Fase 7).
+- `HostKeys.__delitem__` hanya menghapus satu entri per panggilan → `forget_host` mengulang sampai
+  semua jenis key host tersebut terhapus.
+
+### Yang dikerjakan
+- 4.1 `core/errors.py`: `UserError`, `HostKeyRejected`, `describe_error()` (12 baris §7.10).
+- 4.2 `core/known_hosts.py`: `ensure_file` (+ `0o600`), `fingerprint_sha256`, `entry_name`,
+  `forget_host` dengan lock modul.
+- 4.3 `core/ssh_worker.py`: `ConnectParams` (secret `repr=False`), `HostKeyDecision`,
+  `WorkerProtocol`, `SSHWorker` (thread daemon `ssh-<host>`, queue keluar, resize terbaru, backpressure,
+  `stop()` tanpa menunggu, `join()`), `_InteractivePolicy`.
+- 4.4 `ui/dialogs.py`: `PasswordDialog.ask()`, `HostKeyDialog.ask()` (tutup = REJECT), `confirm()`.
+- 4.5 `ui/terminal_tab.py`: `TabState`, state machine §9.6.1, banner (Hubungkan Ulang/Tutup Tab),
+  alur §9.6.3 untuk password termasuk retry maks. 3×, host key dialog, pesan `E_HOSTKEY_CHANGED`,
+  R/Enter untuk reconnect; sinyal dari worker lama diabaikan.
+- 4.6 `MainWindow.open_adhoc()`, `open_session()`, `active_tab()`, aksi Hubungkan Ulang, teks status
+  kiri; `--connect user@host[:port]` (juga `[ipv6]:port`) dengan pesan error argparse.
+- 4.7 `tests/fakes.py`: `FakeWorker` + `WorkerFactory`.
+- 4.8 Test: `test_errors`, `test_known_hosts`, `test_terminal_tab`, `test_dialogs`, parsing
+  `--connect` di `test_app`, `integration/conftest.py` + `integration/test_ssh_password.py`.
+
+### Bug yang ditemukan & diperbaiki
+- **Race `exit-status`**: OpenSSH dapat mengirim EOF channel sebelum `exit-status`. Loop I/O lalu
+  melaporkan "Koneksi terputus." alih-alih "Sesi berakhir (kode keluar N)". Terukur 10 dari 20
+  percobaan sebelum perbaikan; setelah `_wait_exit_status()` (tunggu ≤ 1 s selama transport aktif)
+  30/30 benar. Regresi dijaga `test_12_exit_status_reported_reliably`.
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 549 lulus, 0 gagal |
+| pytest (integration) | 12 lulus (11 skenario §10.3 + 1 regresi) |
+| Coverage modul target | errors 100 %, known_hosts 100 %, ssh_worker 91 % (unit + integrasi) |
+
+### Kriteria penerimaan
+- [x] AC-4.1 Quality Gate lulus; coverage `core/errors`, `core/known_hosts` ≥ 90 %,
+  `core/ssh_worker` ≥ 70 %.
+- [x] AC-4.2 Seluruh 11 skenario §10.3 lulus terhadap `sshd` nyata.
+- [x] AC-4.3 `test_ui_does_not_import_paramiko`: tidak ada modul `ui/` yang mengimpor `paramiko`;
+  semua panggilan jaringan ada di `SSHWorker._run` (thread worker).
+
+Verifikasi tambahan tanpa layar (aplikasi sungguhan, `--connect tester@127.0.0.1:2222`): dialog
+password → dialog host key (fingerprint sama dengan `ssh-keygen -lf
+/etc/ssh/ssh_host_ed25519_key.pub`) → "Terhubung"; ketikan lewat keyboard simulasi menghasilkan
+`pyssh-42`; `tput cols/lines` = `130 38` = grid status bar; `exit` → banner "Sesi berakhir (kode
+keluar 0)."; tombol R → menghubungkan ulang.
+
+### Checklist manual (diisi user; server Linux nyata, `python -m pyssh --connect user@host`)
+- [ ] MT-4.1 `ls --color`, `htop`, `vim`, `nano`, `less /etc/services` tampil dan bisa dioperasikan;
+  setelah keluar dari vim, prompt bisa dipakai normal. — OS: — hasil:
+- [ ] MT-4.2 `ping 8.8.8.8` lalu Ctrl+C berhenti ≤ 1 s. — OS: — hasil:
+- [ ] MT-4.3 Resize jendela saat `htop` → htop menyesuaikan ukuran. — OS: — hasil:
+- [ ] MT-4.4 `tput cols; tput lines` sama dengan `cols×rows` di status bar. — OS: — hasil:
+- [ ] MT-4.5 Host baru → dialog fingerprint muncul; sama dengan
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` di server. — OS: — hasil:
+- [ ] MT-4.6 Ketik `exit` → banner "Terputus"/"Sesi berakhir"; tekan R → terhubung lagi.
+  — OS: — hasil:
+- [ ] MT-4.7 Putuskan jaringan → aplikasi tetap responsif; status "Terputus" muncul ≤ 3 menit.
+  — OS: — hasil:
+
+### Penyimpangan & keputusan
+- Alur secret tersimpan (§9.6.3 langkah 2, 5, 7) sudah dibuat di Fase 4 karena satu alur dengan
+  login password; diuji di Fase 4 dan dilanjutkan di Fase 5.
+- Lock `known_hosts` bernama publik `KNOWN_HOSTS_LOCK` (dipakai juga oleh `ssh_worker`).
+- `TerminalTab.info_message` (sinyal) ditambahkan agar info "password tidak disimpan" tampil di status
+  bar `MainWindow` (§9.6.3 langkah 5).
+- Login private key (`_connect_with_key`) masih placeholder yang gagal dengan pesan; dikerjakan Fase 7.
+- Log hanya mencatat nama kelas exception saat koneksi putus di loop I/O (tanpa isi pesan).
+
+### Masalah yang diketahui
+- MT-4.7 (koneksi putus mendadak) bergantung pada keepalive 30 s + perilaku TCP OS; hanya bisa
+  diverifikasi manual.

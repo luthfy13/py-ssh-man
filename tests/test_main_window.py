@@ -148,3 +148,83 @@ def test_ctrl_tab_switches_tabs_through_terminal(window: MainWindow, qtbot) -> N
     qtbot.waitUntil(second.terminal.hasFocus, timeout=2000)
     qtbot.keyClick(second.terminal, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
     assert window.tabs.currentIndex() == 0
+
+
+@pytest.fixture
+def fake_workers(services):
+    from fakes import WorkerFactory
+
+    services.worker_factory = WorkerFactory()
+    return services.worker_factory
+
+
+@pytest.fixture
+def password_answer(monkeypatch: pytest.MonkeyPatch):
+    from pyssh.ui.dialogs import PasswordDialog
+
+    monkeypatch.setattr(PasswordDialog, "ask", lambda self: ("pw", False))
+
+
+def test_open_adhoc_tab(window: MainWindow, fake_workers, password_answer, qtbot) -> None:
+    from pyssh.ui.terminal_tab import TabState
+
+    window.show()
+    tab = window.open_adhoc("admin", "10.0.0.5", 2222)
+    assert window.tabs.tabText(0) == "admin@10.0.0.5"
+    assert window.active_tab() is tab
+    assert tab.adhoc
+    assert window.state_label.text() == "Menghubungkan… — admin@10.0.0.5:2222"
+    fake_workers.last.connected.emit()
+    assert tab.state is TabState.CONNECTED
+    assert window.state_label.text() == "Terhubung — admin@10.0.0.5:2222"
+
+
+def test_open_session_and_reconnect(
+    window: MainWindow, services, fake_workers, password_answer, qtbot
+) -> None:
+    from pyssh.models import SessionConfig
+    from pyssh.ui.terminal_tab import TabState
+
+    window.show()
+    session = SessionConfig(name="Web", host="h", username="u")
+    services.session_store.add(session)
+    tab = window.open_session(session)
+    assert window.tabs.tabText(0) == "Web"
+    assert not tab.adhoc
+    fake_workers.last.failed.emit("E_CONNECT", "gagal")
+    assert tab.state is TabState.FAILED
+    window.action_reconnect.trigger()
+    assert len(fake_workers.workers) == 2
+    assert tab.state is TabState.CONNECTING
+
+
+def test_close_tab_stops_session(window: MainWindow, fake_workers, password_answer) -> None:
+    from pyssh.ui.terminal_tab import TabState
+
+    tab = window.open_adhoc("u", "h")
+    worker = fake_workers.last
+    window.close_tab(0)
+    assert worker.stopped
+    assert tab.state is TabState.CLOSED
+    assert window.tabs.count() == 0
+    window.reconnect_current()  # no tab: no error
+
+
+def test_banner_close_and_info_message(
+    window: MainWindow, fake_workers, password_answer, monkeypatch
+) -> None:
+    from pyssh.ui import terminal_tab as tab_module
+
+    monkeypatch.setattr(tab_module, "ensure_vault_unlocked", lambda parent, vault: False)
+    from pyssh.ui.dialogs import PasswordDialog
+
+    monkeypatch.setattr(PasswordDialog, "ask", lambda self: ("pw", True))
+    from pyssh.models import SessionConfig
+
+    session = SessionConfig(name="S", host="h", username="u")
+    window.services.session_store.add(session)
+    tab = window.open_session(session)
+    fake_workers.last.connected.emit()
+    assert window.statusBar().currentMessage() == strings.SECRET_NOT_SAVED_VAULT
+    tab.close_requested.emit()
+    assert window.tabs.count() == 0

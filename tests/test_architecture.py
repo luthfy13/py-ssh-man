@@ -133,3 +133,13 @@ def test_every_module_uses_future_annotations() -> None:
         if not has:
             missing.append(str(path.relative_to(SRC)))
     assert missing == []
+
+
+def test_ui_does_not_import_paramiko() -> None:
+    """AC-4.3: network code stays in the worker; ui/ never imports paramiko directly."""
+    offenders = [
+        str(p.relative_to(SRC))
+        for p in sorted((SRC / "ui").glob("*.py"))
+        if any(n == "paramiko" or n.startswith("paramiko.") for n in _imported_modules(p))
+    ]
+    assert offenders == []

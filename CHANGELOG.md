@@ -15,3 +15,9 @@ Semua perubahan penting pada PySSH dicatat di file ini.
 - Fase 3: emulator terminal (pyte + scrollback), widget terminal (render, keyboard lintas
   platform, seleksi, clipboard, bracketed paste, zoom, backpressure), tabel shortcut per platform,
   mode `--demo` dengan key inspector, benchmark emulator.
+- Fase 4: koneksi SSH dengan password di thread worker, verifikasi host key (TOFU), pemetaan
+  error, tab terminal dengan state, banner reconnect, `--connect user@host[:port]`.
+
+### Diperbaiki
+- Alasan terputus kadang salah ("Koneksi terputus.") karena OpenSSH mengirim EOF sebelum
+  `exit-status`.

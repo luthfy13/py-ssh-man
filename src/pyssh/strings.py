@@ -107,3 +107,70 @@ ACTION_ZOOM_IN = "Perbesar"
 ACTION_ZOOM_OUT = "Perkecil"
 ACTION_ZOOM_RESET = "Ukuran Normal"
 ACTION_TOGGLE_PANEL = "Panel Sesi"
+
+# --- Connection errors (SPEC §7.10) ---
+E_HOSTKEY_REJECTED = "Koneksi dibatalkan: host key tidak diterima."
+E_HOSTKEY_CHANGED = (
+    "PERINGATAN: host key {host}:{port} berubah! Kemungkinan serangan man-in-the-middle, "
+    "atau server diinstal ulang."
+)
+E_AUTH = "Autentikasi gagal untuk {username}@{host}."
+E_CONNECT = "Tidak dapat terhubung ke {host}:{port}. Pastikan layanan SSH berjalan dan port benar."
+E_DNS = 'Host "{host}" tidak ditemukan. Periksa nama host atau DNS.'
+E_TIMEOUT = "Tidak ada respons dari {host}:{port} dalam {timeout} detik."
+E_BANNER = "Layanan di {host}:{port} tidak merespons sebagai server SSH."
+E_SSH = "Kesalahan protokol SSH: {detail}"
+E_EOF = "Koneksi diputus oleh server."
+E_NETWORK = "Kesalahan jaringan: {detail}"
+E_UNKNOWN = "Kesalahan tak terduga ({name}). Lihat log untuk detail."
+
+# --- Disconnect reasons ---
+DISCONNECT_LOST = "Koneksi terputus."
+DISCONNECT_BY_USER = "Koneksi ditutup."
+DISCONNECT_SESSION_ENDED = "Sesi berakhir (kode keluar {code})."
+
+# --- Password / host key dialogs (SPEC §9.7) ---
+PASSWORD_TITLE = "Password"
+PASSPHRASE_TITLE = "Passphrase"
+PASSWORD_PROMPT = "Password untuk {target}"
+PASSPHRASE_PROMPT = "Passphrase untuk {path}"
+PASSWORD_FIELD = "Password:"
+PASSPHRASE_FIELD = "Passphrase:"
+PASSWORD_REMEMBER = "Simpan password"
+PASSPHRASE_REMEMBER = "Simpan passphrase"
+PASSWORD_RETRY = "Password salah, coba lagi."
+BUTTON_OK = "OK"
+BUTTON_CANCEL = "Batal"
+HOSTKEY_TITLE = "Host Key Belum Dikenal"
+HOSTKEY_UNKNOWN = "Server {host}:{port} belum dikenal."
+HOSTKEY_TYPE = "Jenis key: {key_type}"
+HOSTKEY_FINGERPRINT = "Fingerprint:"
+HOSTKEY_VERIFY = "Pastikan fingerprint ini sesuai dengan milik server sebelum melanjutkan."
+HOSTKEY_ACCEPT_SAVE = "Terima && Simpan"
+HOSTKEY_ACCEPT_ONCE = "Terima Sekali Ini"
+HOSTKEY_CHANGED_TITLE = "Host Key Berubah"
+HOSTKEY_CHANGED_HINT_SESSION = (
+    "Bila perubahan ini memang diharapkan, klik kanan sesi → Lupakan Host Key, "
+    "lalu hubungkan ulang."
+)
+HOSTKEY_CHANGED_HINT_ADHOC = (
+    "Bila perubahan ini memang diharapkan, hapus entri host ini dari file:\n{path}"
+)
+
+# --- Terminal tab (SPEC §9.6) ---
+CONNECTING = "Menghubungkan ke {target} …"
+STATE_IDLE = "Belum terhubung"
+STATE_CONNECTING = "Menghubungkan…"
+STATE_CONNECTED = "Terhubung"
+STATE_DISCONNECTED = "Terputus"
+STATE_FAILED = "Gagal"
+STATUS_LINE = "{state} — {target}"
+CANCELLED_BY_USER = "Dibatalkan oleh pengguna."
+PRESS_R_TO_RECONNECT = "{reason} Tekan R untuk menghubungkan ulang."
+KEY_REJECTED = "Server menolak private key ini."
+BANNER_RECONNECT = "Hubungkan Ulang"
+BANNER_CLOSE = "Tutup Tab"
+SECRET_NOT_SAVED_VAULT = "Password tidak disimpan karena vault tidak dibuka."
+
+# --- Command line ---
+ERR_CONNECT_ARG = "format --connect harus user@host[:port]"

@@ -116,3 +116,33 @@ def test_locked_vault_shows_unlock_dialog_at_startup(
     assert seen == ["Lewati"]
     log_text = (pyssh_home / "logs" / "pyssh.log").read_text(encoding="utf-8")
     assert "startup startup_ms=" in log_text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("admin@10.0.0.5", ("admin", "10.0.0.5", 22)),
+        ("admin@host:2222", ("admin", "host", 2222)),
+        ("root@[::1]:2200", ("root", "::1", 2200)),
+        ("root@[::1]", ("root", "::1", 22)),
+        ("root@fe80::1", ("root", "fe80::1", 22)),
+    ],
+)
+def test_parse_target(text: str, expected: tuple[str, str, int]) -> None:
+    assert app_module.parse_target(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["host", "@host", "user@", "u@h:0", "u@h:70000", "u@h:x", "u@[::1", "u@[::1]x", "u@:22"],
+)
+def test_parse_target_invalid(text: str) -> None:
+    with pytest.raises(ValueError):
+        app_module.parse_target(text)
+
+
+def test_invalid_connect_argument_exits(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as info:
+        app_module.main(["--connect", "nohost"])
+    assert info.value.code == 2
+    assert "user@host[:port]" in capsys.readouterr().err

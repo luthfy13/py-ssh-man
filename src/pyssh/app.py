@@ -17,6 +17,7 @@ from pyssh.core.database import SCHEMA_VERSION, Database, DatabaseVersionError
 from pyssh.core.secret_store import SecretStore
 from pyssh.core.session_store import SessionStore
 from pyssh.core.settings_store import SettingsStore
+from pyssh.core.ssh_worker import SSHWorker
 from pyssh.core.vault import Vault, VaultState
 from pyssh.logging_setup import setup_logging
 from pyssh.services import AppServices
@@ -36,6 +37,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="verbose logging")
     parser.add_argument("--version", action="store_true", help="print the version and exit")
     return parser
+
+
+def parse_target(text: str) -> tuple[str, str, int]:
+    """Parse ``user@host[:port]``; IPv6 hosts may be written as ``[addr]:port``."""
+    user, sep, rest = text.partition("@")
+    if not sep or not user or not rest:
+        raise ValueError(text)
+    port = 22
+    if rest.startswith("["):
+        host, bracket, tail = rest[1:].partition("]")
+        if not bracket or (tail and not tail.startswith(":")):
+            raise ValueError(text)
+        if tail:
+            port = int(tail[1:])
+    elif rest.count(":") == 1:
+        host, _, port_text = rest.partition(":")
+        port = int(port_text)
+    else:
+        host = rest  # no port, or a bare IPv6 address
+    if not host or not 1 <= port <= 65535:
+        raise ValueError(text)
+    return user, host, port
 
 
 def install_excepthooks(log_file: str) -> None:
@@ -69,7 +92,14 @@ def install_excepthooks(log_file: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     """Run the application and return the process exit code."""
     started = time.perf_counter()
-    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    target = None
+    if args.connect:
+        try:
+            target = parse_target(args.connect)
+        except ValueError:
+            parser.error(strings.ERR_CONNECT_ARG)
     if args.version:
         print(strings.VERSION_LINE.format(app=config.APP_NAME, version=__version__))
         return 0
@@ -114,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     log.info("startup startup_ms=%d", round(startup_ms))
     if args.demo:
         window.open_demo_tab()
+    if target is not None:
+        window.open_adhoc(*target)
     if db_warning:
         QTimer.singleShot(0, lambda: QMessageBox.warning(window, strings.WARNING_TITLE, db_warning))
     try:
@@ -135,4 +167,5 @@ def build_services(paths: config.AppPaths, database: Database) -> AppServices:
         settings_store=settings_store,
         vault=vault,
         secret_store=SecretStore(database, vault),
+        worker_factory=SSHWorker,
     )

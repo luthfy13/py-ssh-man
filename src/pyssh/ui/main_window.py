@@ -10,10 +10,12 @@ from PySide6.QtWidgets import QLabel, QMainWindow, QTabWidget, QWidget
 
 from pyssh import config, shortcuts, strings
 from pyssh.core.vault import VaultState
+from pyssh.models import SessionConfig
 from pyssh.services import AppServices
 from pyssh.terminal.demo_backend import DemoBackend
 from pyssh.terminal.view import TerminalView
 from pyssh.terminal.widget import TerminalWidget
+from pyssh.ui.terminal_tab import TerminalTab
 from pyssh.ui.vault_dialogs import (
     ChangeMasterPasswordDialog,
     CreateMasterPasswordDialog,
@@ -62,6 +64,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         self._build_menus()
+        self.state_label = QLabel()
+        self.statusBar().addWidget(self.state_label, 1)
         self.vault_label = QLabel()
         self.grid_label = QLabel()
         self.statusBar().addPermanentWidget(self.vault_label)
@@ -97,6 +101,10 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_quit)
 
         session_menu = self.menuBar().addMenu(strings.MENU_SESSION)
+        self.action_reconnect = self._action(
+            strings.ACTION_RECONNECT, self.reconnect_current, "reconnect"
+        )
+        session_menu.addAction(self.action_reconnect)
         self.action_close_tab = self._action(
             strings.ACTION_CLOSE_TAB, self.close_current_tab, "close_tab"
         )
@@ -172,6 +180,39 @@ class MainWindow(QMainWindow):
         backend.start()
         return view
 
+    def open_session(self, session: SessionConfig) -> TerminalTab:
+        """Open a saved session in a new tab and start connecting."""
+        return self._open_terminal_tab(session, adhoc=False)
+
+    def open_adhoc(self, user: str, host: str, port: int = 22) -> TerminalTab:
+        """Open an unsaved ``user@host:port`` session (``--connect``)."""
+        session = SessionConfig(name=f"{user}@{host}", host=host, username=user, port=port)
+        return self._open_terminal_tab(session, adhoc=True)
+
+    def active_tab(self) -> TerminalTab | None:
+        """The current tab when it is an SSH tab."""
+        widget = self.tabs.currentWidget()
+        return widget if isinstance(widget, TerminalTab) else None
+
+    def reconnect_current(self) -> None:
+        """Reconnect the active SSH tab."""
+        tab = self.active_tab()
+        if tab is not None:
+            tab.reconnect()
+
+    def _open_terminal_tab(self, session: SessionConfig, *, adhoc: bool) -> TerminalTab:
+        tab = TerminalTab(session, self._services, adhoc=adhoc)
+        tab.state_changed.connect(lambda _state, t=tab: self._on_tab_state(t))
+        tab.close_requested.connect(lambda t=tab: self.close_tab(self.tabs.indexOf(t)))
+        tab.info_message.connect(lambda text: self.statusBar().showMessage(text, 10000))
+        self._add_terminal_tab(tab, session.name)
+        tab.connect_session()
+        return tab
+
+    def _on_tab_state(self, tab: TerminalTab) -> None:
+        if tab is self.active_tab():
+            self.state_label.setText(tab.status_text())
+
     def _add_terminal_tab(self, view: QWidget, title: str) -> int:
         terminal = getattr(view, "terminal", None)
         if isinstance(terminal, TerminalWidget):
@@ -198,6 +239,8 @@ class MainWindow(QMainWindow):
         widget = self.tabs.widget(index)
         if widget is None:
             return
+        if isinstance(widget, TerminalTab):
+            widget.close_session()
         self.tabs.removeTab(index)
         widget.deleteLater()
 
@@ -227,6 +270,8 @@ class MainWindow(QMainWindow):
             self.grid_label.clear()
         else:
             self._show_grid(*terminal.grid_size())
+        tab = self.active_tab()
+        self.state_label.setText(tab.status_text() if tab is not None else "")
 
     def _on_grid_size(self, terminal: TerminalWidget, cols: int, rows: int) -> None:
         if terminal is self.active_terminal():
