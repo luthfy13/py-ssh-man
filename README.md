@@ -141,10 +141,10 @@ Tanpa Docker (container/VM Linux, sebagai root): pasang `openssh-server`, buat u
 data, sehingga butuh password uji yang **unik** (≥ 12 karakter, mis. `secret-Z9q7-unique`) di server
 dan di `PYSSH_TEST_PASSWORD`; dengan password `secret` test ini di-skip.
 
-### CI (belum aktif)
+### CI
 
-`docs/ci/github-actions-test.yml` menjalankan unit test di Ubuntu, Windows, dan macOS. GitHub hanya
-menjalankan workflow di `.github/workflows/`; pindahkan file itu ke sana untuk mengaktifkannya.
+`.github/workflows/test.yml` menjalankan lint dan unit test di Ubuntu, Windows, dan macOS pada
+setiap push dan pull request (tanpa test integrasi).
 
 ### Alat bantu
 

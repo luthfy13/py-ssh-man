@@ -1,8 +1,6 @@
 # GitHub Actions: unit tests on Linux, Windows and macOS (SPEC §11.12, task 9.4, COULD).
-#
-# NOT ACTIVE: GitHub only runs workflows stored in .github/workflows/. To enable it, move this
-# file to .github/workflows/test.yml (SPEC §10.5: workflow files are pushed only with the
-# owner's explicit permission). Integration tests are excluded (no SSH test server in CI).
+# Activated with the repository owner's permission (SPEC §10.5). Integration tests are excluded
+# (no SSH test server in CI).
 name: test
 
 on:

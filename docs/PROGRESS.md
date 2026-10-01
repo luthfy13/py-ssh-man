@@ -769,3 +769,8 @@ di-resize saat htop berjalan, `stty size` = grid widget (45×24).
 ### Masalah yang diketahui
 - Semua hal khusus Windows/macOS (font, keyboard AltGr/Option/Cmd, menu aplikasi macOS, izin file,
   Wayland) hanya diuji lewat parameter injeksi di Linux; perilaku nyata menunggu MT-9.x.
+
+### Tambahan setelah izin user — 2026-10-01
+- Workflow CI dipindahkan dari `docs/ci/github-actions-test.yml` ke `.github/workflows/test.yml`
+  (aktif).
+- Tag `v0.1.0` dibuat dan di-push.

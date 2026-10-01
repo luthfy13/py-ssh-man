@@ -4,8 +4,7 @@ Semua perubahan penting pada PySSH dicatat di file ini.
 
 ## [0.1.0] — 2026-10-01
 
-Rilis sumber pertama (dijalankan dengan Python; tanpa paket installer). Tag git `v0.1.0` dibuat
-setelah ada izin pemilik repository.
+Rilis sumber pertama (dijalankan dengan Python; tanpa paket installer). Tag git: `v0.1.0`.
 
 ### Ditambahkan
 - **Sesi tersimpan** di SQLite: tambah, edit, duplikat, hapus, cari (nama/host/user), "Lupakan
@@ -25,6 +24,7 @@ setelah ada izin pemilik repository.
 - **Pengaturan** (font, ukuran, scrollback, salin otomatis, warna tebal, konfirmasi, keepalive,
   timeout), posisi jendela tersimpan, menu Bantuan (folder data, file log, Tentang).
 - Log berputar tanpa secret, `--debug`, `--version`, instrumentasi `PYSSH_DEBUG_PERF=1`.
+- CI GitHub Actions: lint + unit test di Ubuntu, Windows, macOS.
 - Alat bantu: `tools/make_ansi_demo.py`, `tools/make_icon.py`, `tools/bench_emulator.py`.
 - 661 unit test dan 20 test integrasi (server SSH nyata), test arsitektur (batas impor Qt, teks UI
   dari `strings.py`, tanpa `print`, tanpa `sys.platform` di luar `config.py`).
