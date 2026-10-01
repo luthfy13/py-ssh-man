@@ -32,6 +32,9 @@ SELECT_TIMEOUT_S = 0.02
 PAUSE_SLEEP_S = 0.01
 RECV_SIZE = 65536
 EXIT_STATUS_WAIT_S = 1.0
+# SSH flow-control window of the shell channel. paramiko's default is 2 MiB; at pyte's
+# ~0.3 MB/s that much data in flight delays Ctrl+C by seconds (N-04, measured in Phase 8).
+CHANNEL_WINDOW_SIZE = 128 * 1024
 BANNER_TIMEOUT = 15
 AUTH_TIMEOUT = 20
 
@@ -226,7 +229,10 @@ class SSHWorker(QObject):
                 raise paramiko.SSHException("no transport after connect")
             if p.keepalive > 0:
                 transport.set_keepalive(p.keepalive)
-            chan = client.invoke_shell(term="xterm-256color", width=p.cols, height=p.rows)
+            # Same steps as SSHClient.invoke_shell(), but with a smaller channel window.
+            chan = transport.open_session(window_size=CHANNEL_WINDOW_SIZE)
+            chan.get_pty(term="xterm-256color", width=p.cols, height=p.rows)
+            chan.invoke_shell()
             self._connected_flag.set()
             log.info("connected %s@%s:%s", p.username, p.host, p.port)
             self.connected.emit()

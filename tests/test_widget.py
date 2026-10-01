@@ -324,8 +324,9 @@ def test_input_method_commit(term: TerminalWidget) -> None:
 
 
 def test_backpressure_constants() -> None:
-    assert BACKPRESSURE_HIGH == 4 * 1024 * 1024
-    assert widget_module.BACKPRESSURE_LOW == 1024 * 1024
+    # Lowered from SPEC §8.4.3 (4 MiB / 1 MiB) in Phase 8 for N-04; see docs/PROGRESS.md.
+    assert BACKPRESSURE_HIGH == 256 * 1024
+    assert widget_module.BACKPRESSURE_LOW == 64 * 1024
 
 
 def test_backpressure_thresholds(term: TerminalWidget, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -425,3 +426,71 @@ def test_view_scrollbar_sync(qtbot) -> None:
     assert term.view_offset == 7
     term.scroll_to_bottom()
     assert bar.value() == history
+
+
+class _FakeClipboard:
+    """Clipboard with X11-style primary selection (offscreen Qt has none)."""
+
+    def __init__(self) -> None:
+        from PySide6.QtGui import QClipboard
+
+        self.data = {QClipboard.Mode.Clipboard: "", QClipboard.Mode.Selection: ""}
+
+    def supportsSelection(self) -> bool:
+        return True
+
+    def setText(self, text: str, mode=None) -> None:
+        from PySide6.QtGui import QClipboard
+
+        self.data[mode or QClipboard.Mode.Clipboard] = text
+
+    def text(self, mode=None) -> str:
+        from PySide6.QtGui import QClipboard
+
+        return self.data[mode or QClipboard.Mode.Clipboard]
+
+
+def test_primary_selection(term: TerminalWidget, qtbot, monkeypatch) -> None:
+    from PySide6.QtGui import QClipboard
+
+    fake = _FakeClipboard()
+    monkeypatch.setattr(QGuiApplication, "clipboard", staticmethod(lambda: fake))
+    term.feed(b"select me")
+    term.flush_pending()
+    cw, ch = term.cell_size
+    y = int(PADDING + ch / 2)
+    qtbot.mousePress(term, Qt.MouseButton.LeftButton, pos=QPoint(int(PADDING + 1), y))
+    qtbot.mouseMove(term, QPoint(int(PADDING + 6 * cw + 1), y))
+    qtbot.mouseRelease(term, Qt.MouseButton.LeftButton, pos=QPoint(int(PADDING + 6 * cw + 1), y))
+    assert fake.data[QClipboard.Mode.Selection] == "select"
+    assert fake.data[QClipboard.Mode.Clipboard] == "select"
+    sent = _record(term.input_bytes)
+    fake.data[QClipboard.Mode.Selection] = "primary"
+    qtbot.mouseClick(term, Qt.MouseButton.MiddleButton, pos=QPoint(20, 10))
+    assert sent == [b"primary"]
+
+
+def test_primary_selection_without_copy_on_select(qtbot, monkeypatch) -> None:
+    from PySide6.QtGui import QClipboard
+
+    fake = _FakeClipboard()
+    monkeypatch.setattr(QGuiApplication, "clipboard", staticmethod(lambda: fake))
+    widget = TerminalWidget(replace(AppSettings(), copy_on_select=False))
+    qtbot.addWidget(widget)
+    widget.resize(600, 300)
+    widget.show()
+    qtbot.waitExposed(widget)
+    widget.feed(b"word here")
+    widget.flush_pending()
+    cw, ch = widget.cell_size
+    qtbot.mouseDClick(
+        widget, Qt.MouseButton.LeftButton, pos=QPoint(int(PADDING + cw + 1), int(PADDING + ch / 2))
+    )
+    assert fake.data[QClipboard.Mode.Selection] == "word"
+    assert fake.data[QClipboard.Mode.Clipboard] == ""
+
+
+def test_middle_click_without_selection_support_does_nothing(term: TerminalWidget, qtbot) -> None:
+    sent = _record(term.input_bytes)
+    qtbot.mouseClick(term, Qt.MouseButton.MiddleButton, pos=QPoint(20, 10))
+    assert sent == []

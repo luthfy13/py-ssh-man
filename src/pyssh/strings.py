@@ -239,3 +239,33 @@ KEY_BAD_PASSPHRASE = "Passphrase salah."
 KEY_UNSUPPORTED_TYPE = "Jenis private key tidak didukung (hanya Ed25519, ECDSA, dan RSA)."
 KEY_INVALID = "File bukan private key yang valid: {path}"
 PASSPHRASE_RETRY = "Passphrase salah, coba lagi."
+
+# --- Settings dialog (SPEC §9.10) ---
+SETTINGS_TITLE = "Pengaturan"
+SETTINGS_FONT = "Font:"
+SETTINGS_FONT_AUTO = "Otomatis (sesuai sistem operasi)"
+SETTINGS_FONT_SIZE = "Ukuran font:"
+SETTINGS_SCROLLBACK = "Baris scrollback:"
+SETTINGS_COPY_ON_SELECT = "Salin otomatis saat menyeleksi"
+SETTINGS_BOLD_BRIGHT = "Teks tebal memakai warna terang"
+SETTINGS_CONFIRM_CLOSE = "Konfirmasi saat menutup tab/aplikasi"
+SETTINGS_KEEPALIVE = "Keepalive (detik, 0 = mati):"
+SETTINGS_TIMEOUT = "Timeout koneksi (detik):"
+SETTINGS_OPTION_META = "Option sebagai Meta"
+SETTINGS_NOTE = (
+    "Font dan ukuran berlaku langsung. Baris scrollback, keepalive, dan timeout berlaku untuk "
+    "tab/koneksi baru."
+)
+
+# --- Help menu (SPEC §9.1) ---
+ACTION_OPEN_DATA_FOLDER = "Buka Folder Data"
+ACTION_OPEN_LOG = "Buka File Log"
+ACTION_ABOUT = "Tentang {app}"
+ABOUT_TITLE = "Tentang {app}"
+ABOUT_TEXT = (
+    "{app} {version}\n\n"
+    "SSH client desktop lintas platform.\n\n"
+    "Python {python}\nQt {qt} (PySide6 {pyside})\n\n"
+    "Pustaka: PySide6 (LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only), "
+    "paramiko (LGPL-2.1), pyte (LGPLv3), cryptography (Apache-2.0 OR BSD-3-Clause)."
+)

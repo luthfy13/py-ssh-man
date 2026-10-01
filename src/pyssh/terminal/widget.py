@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
+    QClipboard,
     QColor,
     QContextMenuEvent,
     QFocusEvent,
@@ -43,12 +44,19 @@ MIN_COLS = 20
 MIN_ROWS = 5
 FONT_MIN = 6
 FONT_MAX = 32
-PUMP_CHUNK = 16 * 1024
+# SPEC §8.4.3 names 16 KiB chunks, but one 16 KiB chunk takes ~50 ms in pyte (~0.3 MB/s),
+# far over the 8 ms budget; 2 KiB keeps each step within it (Phase 8, task 8.2).
+PUMP_CHUNK = 2 * 1024
 PUMP_BUDGET_S = 0.008
 REPAINT_INTERVAL_MS = 16
+# While output is still queued, repaint at most every 50 ms: a full repaint costs ~7 ms
+# and at 60 fps took ~40 % of the time during floods (Phase 8, task 8.2).
+REPAINT_BUSY_MS = 50
 RESIZE_DEBOUNCE_MS = 120
-BACKPRESSURE_HIGH = 4 * 1024 * 1024
-BACKPRESSURE_LOW = 1024 * 1024
+# SPEC §8.4.3 suggests 4 MiB / 1 MiB; lowered in Phase 8 (task 8.2) because pyte processes
+# only ~0.3 MB/s and the backlog delayed Ctrl+C beyond N-04's 2 s (see docs/PROGRESS.md).
+BACKPRESSURE_HIGH = 256 * 1024
+BACKPRESSURE_LOW = 64 * 1024
 WHEEL_NOTCH = 120
 WHEEL_LINES_PER_NOTCH = 3
 PERF_TICK_MS = 100
@@ -152,6 +160,7 @@ class TerminalWidget(QWidget):
         self._pixel_acc = 0.0
         self._title = ""
         self._colors: dict[str, QColor] = {}
+        self._styles: dict[tuple, tuple] = {}
         self._fonts: dict[tuple[bool, bool], QFont] = {}
         self._cell_w = 1.0
         self._cell_h = 1.0
@@ -285,13 +294,20 @@ class TerminalWidget(QWidget):
         if not text:
             return False
         QGuiApplication.clipboard().setText(text)
+        self._set_primary_selection(text)
         return True
 
-    def paste_clipboard(self) -> None:
+    def _set_primary_selection(self, text: str) -> None:
+        """Linux/X11 "primary selection" (middle-click paste), when the platform has it."""
+        clipboard = QGuiApplication.clipboard()
+        if clipboard.supportsSelection():
+            clipboard.setText(text, QClipboard.Mode.Selection)
+
+    def paste_clipboard(self, mode: QClipboard.Mode = QClipboard.Mode.Clipboard) -> None:
         """Send clipboard text, using bracketed paste when the application enabled it."""
         if not self._input_enabled:
             return
-        text = QGuiApplication.clipboard().text()
+        text = QGuiApplication.clipboard().text(mode)
         if not text:
             return
         text = text.replace("\r\n", "\r").replace("\n", "\r")
@@ -325,6 +341,7 @@ class TerminalWidget(QWidget):
         """Apply new settings; font changes apply now, scrollback only to new tabs."""
         self._settings = settings
         self._colors.clear()
+        self._styles.clear()
         old_size = self._font_size
         self._font_size = _clamp(settings.font_size, FONT_MIN, FONT_MAX)
         self._apply_font()
@@ -390,7 +407,7 @@ class TerminalWidget(QWidget):
         if processed:
             self._sel_anchor = self._sel_end = None
         if not self._repaint_timer.isActive():
-            self._repaint_timer.start()
+            self._repaint_timer.start(REPAINT_BUSY_MS if self._pending else REPAINT_INTERVAL_MS)
         self._emit_scroll_state()
         title = self._emulator.title
         if title != self._title:
@@ -582,6 +599,13 @@ class TerminalWidget(QWidget):
             self.update()
             event.accept()
             return
+        if (
+            event.button() == Qt.MouseButton.MiddleButton
+            and QGuiApplication.clipboard().supportsSelection()
+        ):
+            self.paste_clipboard(QClipboard.Mode.Selection)
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -600,6 +624,8 @@ class TerminalWidget(QWidget):
             if self.has_selection():
                 if self._settings.copy_on_select:
                     self.copy_selection()
+                else:
+                    self._set_primary_selection(self.selected_text())
             else:
                 self.clear_selection()
             event.accept()
@@ -615,6 +641,8 @@ class TerminalWidget(QWidget):
             self.set_selection((line_index, start), (line_index, end))
             if self._settings.copy_on_select:
                 self.copy_selection()
+            else:
+                self._set_primary_selection(self.selected_text())
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -663,6 +691,23 @@ class TerminalWidget(QWidget):
         return color
 
     def _style(self, char, selected: bool) -> tuple:
+        key = (
+            char.fg,
+            char.bg,
+            char.bold,
+            char.italics,
+            char.underscore,
+            char.strikethrough,
+            char.reverse,
+            selected,
+        )
+        style = self._styles.get(key)
+        if style is None:
+            style = self._compute_style(char, selected)
+            self._styles[key] = style
+        return style
+
+    def _compute_style(self, char, selected: bool) -> tuple:
         theme = self._theme
         bright = self._settings.bold_is_bright
         fg = resolve_color(char.fg, is_fg=True, bold=char.bold, theme=theme, bold_is_bright=bright)

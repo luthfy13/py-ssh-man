@@ -2,24 +2,36 @@
 
 from __future__ import annotations
 
+import platform
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from importlib import resources
 
-from PySide6.QtCore import QByteArray, QEvent, QKeyCombination, QObject, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QMouseEvent
+import PySide6
+from PySide6.QtCore import QByteArray, QEvent, QKeyCombination, QObject, Qt, QUrl, qVersion
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QIcon,
+    QKeySequence,
+    QMouseEvent,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
+    QMessageBox,
     QSplitter,
     QStackedWidget,
     QTabWidget,
     QWidget,
 )
 
-from pyssh import config, shortcuts, strings
+from pyssh import __version__, config, shortcuts, strings
 from pyssh.core.vault import VaultState
-from pyssh.models import SessionConfig
+from pyssh.models import AppSettings, SessionConfig
 from pyssh.services import AppServices
 from pyssh.terminal.demo_backend import DemoBackend
 from pyssh.terminal.view import TerminalView
@@ -27,6 +39,7 @@ from pyssh.terminal.widget import TerminalWidget
 from pyssh.ui import icons
 from pyssh.ui.dialogs import confirm
 from pyssh.ui.session_panel import SessionPanel
+from pyssh.ui.settings_dialog import SettingsDialog
 from pyssh.ui.terminal_tab import TabState, TerminalTab
 from pyssh.ui.vault_dialogs import (
     ChangeMasterPasswordDialog,
@@ -54,6 +67,17 @@ _VAULT_STATE_TEXT = {
     VaultState.LOCKED: strings.VAULT_STATE_LOCKED,
     VaultState.UNLOCKED: strings.VAULT_STATE_UNLOCKED,
 }
+
+
+def app_icon() -> QIcon:
+    """Application icon from ``resources/icon.png`` (empty icon if the file is missing)."""
+    pixmap = QPixmap()
+    try:
+        data = resources.files("pyssh").joinpath("resources", "icon.png").read_bytes()
+    except OSError:
+        return QIcon()
+    pixmap.loadFromData(data)
+    return QIcon(pixmap)
 
 
 def unique_title(name: str, existing: list[str]) -> str:
@@ -86,6 +110,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self._services = services
         self.setWindowTitle(config.APP_NAME)
+        self.setWindowIcon(app_icon())
         self.resize(INITIAL_WIDTH, INITIAL_HEIGHT)
 
         self.tabs = QTabWidget(self)
@@ -160,6 +185,10 @@ class MainWindow(QMainWindow):
         ):
             file_menu.addAction(action)
         file_menu.addSeparator()
+        self.action_settings = self._action(strings.ACTION_SETTINGS, self.open_settings)
+        self.action_settings.setMenuRole(QAction.MenuRole.PreferencesRole)
+        file_menu.addAction(self.action_settings)
+        file_menu.addSeparator()
         self.action_quit = self._action(strings.ACTION_QUIT, self.close)
         self.action_quit.setMenuRole(QAction.MenuRole.QuitRole)
         file_menu.addAction(self.action_quit)
@@ -200,6 +229,51 @@ class MainWindow(QMainWindow):
         self.action_toggle_panel.setChecked(True)
         view_menu.addSeparator()
         view_menu.addAction(self.action_toggle_panel)
+
+        help_menu = self.menuBar().addMenu(strings.MENU_HELP)
+        self.action_open_data = self._action(strings.ACTION_OPEN_DATA_FOLDER, self.open_data_folder)
+        self.action_open_log = self._action(strings.ACTION_OPEN_LOG, self.open_log_file)
+        self.action_about = self._action(
+            strings.ACTION_ABOUT.format(app=config.APP_NAME), self.show_about
+        )
+        self.action_about.setMenuRole(QAction.MenuRole.AboutRole)
+        for action in (self.action_open_data, self.action_open_log, self.action_about):
+            help_menu.addAction(action)
+
+    def open_data_folder(self) -> bool:
+        """Open the data folder in the system file manager."""
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._services.paths.root)))
+
+    def open_log_file(self) -> bool:
+        """Open the log file with the system's default application."""
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._services.paths.log_file)))
+
+    def about_text(self) -> str:
+        """Text of the About box: versions and library licenses."""
+        return strings.ABOUT_TEXT.format(
+            app=config.APP_NAME,
+            version=__version__,
+            python=platform.python_version(),
+            qt=qVersion(),
+            pyside=PySide6.__version__,
+        )
+
+    def show_about(self) -> None:
+        """Help → About."""
+        QMessageBox.about(self, strings.ABOUT_TITLE.format(app=config.APP_NAME), self.about_text())
+
+    def open_settings(self) -> None:
+        """Show the settings dialog and apply the result to every open terminal."""
+        dialog = SettingsDialog(self._services.settings_store, self)
+        if dialog.exec() and dialog.saved_settings is not None:
+            self.apply_settings(dialog.saved_settings)
+
+    def apply_settings(self, settings: AppSettings) -> None:
+        """Font and colors apply immediately; scrollback only affects new tabs (SPEC §9.10)."""
+        for i in range(self.tabs.count()):
+            terminal = getattr(self.tabs.widget(i), "terminal", None)
+            if isinstance(terminal, TerminalWidget):
+                terminal.apply_settings(settings)
 
     def new_session(self) -> None:
         """Create a session (Berkas → Sesi Baru…)."""
@@ -297,9 +371,17 @@ class MainWindow(QMainWindow):
         titles = [self.tabs.tabText(i) for i in range(self.tabs.count())]
         index = self._add_terminal_tab(tab, unique_title(session.name, titles))
         self.tabs.setTabToolTip(index, session.target())
+        tab.title_changed.connect(lambda title, t=tab: self._on_tab_title(t, title))
         self._on_tab_state(tab)
         tab.connect_session()
         return tab
+
+    def _on_tab_title(self, tab: TerminalTab, title: str) -> None:
+        """Show the remote window title (OSC 0/2) in the tab tooltip."""
+        index = self.tabs.indexOf(tab)
+        if index >= 0:
+            target = tab.session.target()
+            self.tabs.setTabToolTip(index, f"{target}\n{title}" if title else target)
 
     def _on_tab_state(self, tab: TerminalTab) -> None:
         index = self.tabs.indexOf(tab)

@@ -143,3 +143,62 @@ def test_ui_does_not_import_paramiko() -> None:
         if any(n == "paramiko" or n.startswith("paramiko.") for n in _imported_modules(p))
     ]
     assert offenders == []
+
+
+# Qt calls whose string arguments are shown to the user (rule A8).
+_UI_TEXT_CALLS = {
+    "setText",
+    "setWindowTitle",
+    "setPlaceholderText",
+    "setToolTip",
+    "setTabToolTip",
+    "addTab",
+    "addAction",
+    "addMenu",
+    "addButton",
+    "addRow",
+    "showMessage",
+    "critical",
+    "warning",
+    "information",
+    "question",
+    "QLabel",
+    "QPushButton",
+    "QCheckBox",
+    "QRadioButton",
+    "QAction",
+}
+
+
+_LOGGERS = {"log", "logger", "logging"}
+
+
+def _call_name(node: ast.Call) -> str | None:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        owner = node.func.value
+        if isinstance(owner, ast.Name) and owner.id in _LOGGERS:
+            return None  # log.warning(...) etc. are not UI text
+        return node.func.attr
+    return None
+
+
+def test_ui_text_comes_from_strings_module() -> None:
+    """A8: user-visible text is defined in ``strings.py``, not as literals in UI code."""
+    offenders = []
+    for path in _all_sources():
+        rel = str(path.relative_to(SRC))
+        if rel == "strings.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _call_name(node) in _UI_TEXT_CALLS:
+                for arg in node.args:
+                    if (
+                        isinstance(arg, ast.Constant)
+                        and isinstance(arg.value, str)
+                        and any(ch.isalpha() for ch in arg.value)
+                    ):
+                        offenders.append(f"{rel}:{node.lineno} {arg.value!r}")
+    assert offenders == []

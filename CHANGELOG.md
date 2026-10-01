@@ -23,7 +23,12 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   menutup tab, penutupan aplikasi menghentikan semua sesi dan mengunci vault.
 - Fase 7: login dengan private key Ed25519/ECDSA/RSA (OpenSSH & PEM) dan passphrase (bisa
   disimpan terenkripsi); file `.ppk` dan PKCS#8 dideteksi dengan petunjuk konversi.
+- Fase 8: alternate screen (vim/htop/less kembali ke layar sebelumnya), dialog Pengaturan, menu
+  Bantuan (folder data, file log, Tentang), judul OSC di tooltip tab, primary selection Linux, ikon
+  aplikasi, README; optimasi aliran data (Ctrl+C saat flood ≤ 2 s).
 
 ### Diperbaiki
 - Alasan terputus kadang salah ("Koneksi terputus.") karena OpenSSH mengirim EOF sebelum
   `exit-status`.
+- Urutan CSI privat (mis. `ESC[?1;2m`) membuat pyte 0.8.2 melempar `TypeError` dan sebagian output
+  hilang (terlihat saat menjalankan vim/htop).

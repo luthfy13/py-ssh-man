@@ -608,3 +608,107 @@ lagi → tersambung tanpa prompt.
 
 ### Masalah yang diketahui
 - Key PKCS#8 harus dikonversi ke format OpenSSH (`ssh-keygen -p -f <file>`) sebelum dipakai.
+
+## Fase 8 — Hardening & Penyempurnaan — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, offscreen), Python 3.12.3,
+Intel Xeon 2,1 GHz, 4 core; server uji `sshd` lokal (loopback)
+
+### Yang dikerjakan
+- 8.1 Pengukuran N-02 s.d. N-07 lewat jalur aplikasi nyata (`MainWindow` → `TerminalTab` →
+  `SSHWorker` → `TerminalWidget`) dengan skrip headless; lag diukur dengan timer 100 ms seperti
+  `PYSSH_DEBUG_PERF=1` (instrumentasi bawaan juga diverifikasi menulis baris `perf max_lag_ms=…`).
+- 8.2 Optimasi (berdasarkan profil, lihat di bawah): window channel SSH 128 KiB, ambang
+  backpressure 256 KiB/64 KiB, chunk pump 2 KiB, repaint adaptif (50 ms saat antrean masih ada),
+  cache gaya sel.
+- 8.3 Alternate screen (F-17): `_ScrollbackScreen.set_mode/reset_mode` untuk private 47/1047/1049
+  menyimpan `dict(buffer)` + salinan kursor, mengosongkan layar, memulihkan saat keluar; scrollback
+  tidak bertambah selama alternate screen.
+- 8.4 `SettingsDialog` (§9.10) + menu Berkas → Pengaturan… (`PreferencesRole`); font & ukuran
+  langsung diterapkan ke semua tab terbuka.
+- 8.5 Item SHOULD/COULD: daftar sesi 2 baris (Fase 5), judul OSC di tooltip tab, pemetaan hex 16
+  warna pertama pyte → tema, primary selection Linux (salin saat seleksi, klik tengah menempel),
+  `tools/make_icon.py` → `resources/icon.png` sebagai ikon jendela.
+- 8.6 Audit: semua pemanggilan `log.*` ditinjau (tidak ada secret, master password, kunci,
+  ciphertext, atau data terminal; hanya host/port/username/kode/kelas exception);
+  `test_ui_text_comes_from_strings_module` (AST) memastikan tidak ada literal teks UI di luar
+  `strings.py` (diuji juga dengan kontrol negatif).
+- 8.7 `README.md`: instalasi per OS, menjalankan, folder data, master password, shortcut, test,
+  server uji, batasan yang diketahui, lisensi pustaka (diverifikasi dari metadata paket).
+- Tambahan: menu **Bantuan** §9.1 (Buka Folder Data, Buka File Log, Tentang PySSH dengan versi
+  aplikasi/Python/Qt dan lisensi; `AboutRole`) yang belum ada di fase sebelumnya.
+
+### Bug yang ditemukan & diperbaiki
+- **pyte 0.8.2 + CSI privat**: `ESC[?…<final>` untuk 22 handler (mis. `ESC[?1;2m`) melempar
+  `TypeError: … unexpected keyword argument 'private'`; sisa data dalam panggilan `feed` hilang dan
+  exception merambat ke event Qt. Muncul nyata saat menjalankan vim/htop lewat SSH. Varian privat yang
+  tidak didukung kini diabaikan, dan error parser lain dicatat (tanpa isi data) tanpa merambat.
+  Regresi: `test_private_csi_variants_do_not_break_parsing` (22 kasus).
+
+### Profil & keputusan optimasi (8.2)
+- cProfile flood `seq 1 200000`: ~94 % waktu di `pyte.ByteStream.feed` (`draw`, `linefeed`), painting
+  tidak signifikan → kecepatan pyte (~0,3 MB/s pada jalur penuh) adalah batas.
+- N-04 gagal awalnya (6,38 s) karena antrean setelah Ctrl+C: `pending` widget (hingga 4 MiB) + window
+  channel paramiko (default 2 MiB = `paramiko.common.DEFAULT_WINDOW_SIZE`). Diperkecil menjadi
+  256 KiB + 128 KiB.
+- Satu chunk 16 KiB butuh ~50 ms di pyte (melebihi anggaran 8 ms) → lag 388 ms saat 5 tab banjir
+  output; chunk 2 KiB → 93 ms.
+- Satu repaint penuh 101×39 ≈ 6,4–6,7 ms; pada 60 fps saat flood memakan ~40 % waktu → repaint
+  adaptif 20 fps selama antrean ada.
+
+### Pengukuran (agent, headless)
+| Metrik | Target | Sebelum optimasi | Sesudah | Catatan |
+|---|---|---|---|---|
+| N-02 lag maks. saat `seq 1 200000` | < 150 ms | 69 ms | **18,2 ms** | lag saat 5 tab banjir bersamaan: 388 → 92,5 ms |
+| N-03 `seq 1 200000` tampil | ≤ 10 s | 4,08 s | **4,78 s** | grid 101×38 |
+| N-04 Ctrl+C saat flood | ≤ 2 s | **6,38 s ✗** | **1,07 s** | waktu dari `\x03` sampai `echo` berikutnya tampil |
+| N-05 startup | ≤ 2 s | — | **26–39 ms** | `startup_ms` di log, offscreen (tanpa render nyata) |
+| N-06 CPU idle 5 tab, 30 s | ≤ 2 % total | 1,44 % | **1,50 %** total (6,0 % dari 1 core) | 4 core; di mesin 2 core setara ±3 % — perlu diukur user |
+| N-07 RSS 5 tab setelah `seq 1 10000` | ≤ 300 MB | 142,8 MB | **142,9 MB** | `/proc/self/status` VmRSS |
+| Benchmark emulator | ≥ 0,3 MB/s (informatif) | 0,730 MB/s | **0,740 MB/s** | `tools/bench_emulator.py` |
+
+Angka final di desktop nyata (render GPU/Windows/macOS, jaringan nyata) **diukur user** lewat MT-8.2.
+
+Verifikasi tambahan tanpa layar (SSH nyata, paket `vim htop less nano` dipasang di server uji):
+vim, htop, less, nano masuk & keluar alternate screen dan layar sebelumnya pulih; setelah jendela
+di-resize saat htop berjalan, `stty size` = grid widget (45×24).
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 661 lulus, 0 gagal |
+| pytest (integration) | 19 lulus, 1 dilewati (audit secret butuh password unik, lihat Fase 5) |
+| Coverage | emulator 100 %, colors 100 %, widget 98 %, settings_dialog 100 %, total 98 % |
+
+### Kriteria penerimaan
+- [x] AC-8.1 Quality Gate lulus.
+- [x] AC-8.2 Tabel N-02 s.d. N-07 di atas: semua memenuhi target di lingkungan headless; angka desktop
+  menunggu MT-8.2.
+- [x] AC-8.3 `test_alternate_screen_restores_main_screen`: setelah `\x1b[?1049h` + teks +
+  `\x1b[?1049l` isi layar dan kursor kembali seperti sebelumnya.
+
+### Checklist manual (diisi user)
+- [ ] MT-8.1 Keluar dari vim/htop → layar kembali ke isi sebelumnya. — OS: — hasil:
+- [ ] MT-8.2 `seq 1 200000` ≤ 10 s; Ctrl+C saat flood (`seq 1 100000000`) ≤ 2 s; pindah tab tetap
+  responsif; catat CPU idle 5 tab (N-06, Task Manager/`top`/Activity Monitor) dan memori (N-07).
+  Jalankan dengan `PYSSH_DEBUG_PERF=1` dan lihat baris `perf max_lag_ms=…` di log. — OS: — hasil:
+- [ ] MT-8.3 Ubah font dan ukuran di Pengaturan → tab terbuka langsung berubah; tersimpan setelah
+  restart. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- **Parameter §8.4.3 diubah berdasarkan pengukuran** (tugas 8.2): chunk pump 16 KiB → 2 KiB, ambang
+  backpressure 4 MiB/1 MiB → 256 KiB/64 KiB, repaint 50 ms selama antrean masih ada (16 ms saat
+  idle); window channel SSH 128 KiB (`Transport.open_session(window_size=…)` + `get_pty` +
+  `invoke_shell`, sama dengan langkah `SSHClient.invoke_shell`).
+- `SettingsDialog`: pilihan "Otomatis" berupa checkbox di samping `QFontComboBox` (QFontComboBox tidak
+  menyediakan item tambahan).
+- Pemetaan 16 warna berdasarkan nilai hex: indeks 256-color lain atau truecolor dengan hex yang sama
+  persis (mis. 196 = `ff0000` = indeks 9) ikut memakai warna tema.
+- Varian privat CSI yang tidak dikenali pyte diabaikan (tidak ada respons untuk mis. `ESC[?6n`).
+
+### Masalah yang diketahui
+- Primary selection hanya bisa diuji dengan clipboard tiruan di lingkungan offscreen
+  (`supportsSelection()` = False); verifikasi nyata di Linux X11/Wayland lewat MT-9.2/9.3.

@@ -429,3 +429,61 @@ def test_close_app_stops_workers_and_locks_vault(
     with pytest.raises(RuntimeError):
         _ = services.database.conn  # closed
     services.database.open()  # for fixture teardown
+
+
+def test_settings_apply_to_open_terminals(window: MainWindow, services, monkeypatch) -> None:
+    from dataclasses import replace
+
+    from pyssh.ui.settings_dialog import SettingsDialog
+
+    view = window.open_demo_tab()
+    new_settings = replace(services.settings_store.current, font_size=15)
+
+    def fake_exec(dialog: SettingsDialog) -> int:
+        dialog.saved_settings = new_settings
+        return 1
+
+    monkeypatch.setattr(SettingsDialog, "exec", fake_exec)
+    window.action_settings.trigger()
+    assert view.terminal.font_size == 15
+
+
+def test_osc_title_in_tab_tooltip(window: MainWindow, fake_workers, password_answer) -> None:
+    tab = window.open_adhoc("u", "h", 2200)
+    fake_workers.last.connected.emit()
+    tab.title_changed.emit("u@h: ~/src")
+    assert window.tabs.tabToolTip(0) == "u@h:2200\nu@h: ~/src"
+    tab.title_changed.emit("")
+    assert window.tabs.tabToolTip(0) == "u@h:2200"
+
+
+def test_window_icon_loaded(window: MainWindow) -> None:
+    from pyssh.ui.main_window import app_icon
+
+    assert not app_icon().isNull()
+    assert not window.windowIcon().isNull()
+
+
+def test_help_menu(window: MainWindow, services, monkeypatch) -> None:
+    import platform
+
+    from PySide6.QtCore import qVersion
+    from PySide6.QtGui import QDesktopServices
+    from PySide6.QtWidgets import QMessageBox
+
+    opened: list[str] = []
+    monkeypatch.setattr(
+        QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()) or True
+    )
+    window.action_open_data.trigger()
+    window.action_open_log.trigger()
+    assert opened == [str(services.paths.root), str(services.paths.log_file)]
+    shown: list[str] = []
+    monkeypatch.setattr(QMessageBox, "about", lambda parent, title, text: shown.append(text))
+    window.action_about.trigger()
+    assert "PySSH 0.1.0" in shown[0]
+    assert platform.python_version() in shown[0]
+    assert qVersion() in shown[0]
+    assert window.action_about.menuRole() == window.action_about.MenuRole.AboutRole
+    assert window.action_settings.menuRole() == window.action_settings.MenuRole.PreferencesRole
+    assert window.action_quit.menuRole() == window.action_quit.MenuRole.QuitRole

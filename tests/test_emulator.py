@@ -194,3 +194,94 @@ def test_clear_scrollback() -> None:
     emu.clear_scrollback()
     assert emu.history_len == 0
     assert emu.screen_lines_text() == ["3", "4"]
+
+
+def test_alternate_screen_restores_main_screen() -> None:
+    """AC-8.3: ESC[?1049h + text + ESC[?1049l restores the previous screen."""
+    emu = TerminalEmulator(20, 5, 100)
+    emu.feed(b"prompt$ vim file\r\nline two")
+    before_text = emu.screen_lines_text()
+    before_cursor = emu.cursor
+    emu.feed(b"\x1b[?1049h")
+    assert emu.in_alt_screen
+    assert emu.screen_lines_text() == [""] * 5
+    emu.feed(b"\x1b[2J\x1b[H~\r\n~\r\nVIM TEXT")
+    assert "VIM TEXT" in emu.screen_lines_text()
+    emu.feed(b"\x1b[?1049l")
+    assert not emu.in_alt_screen
+    assert emu.screen_lines_text() == before_text
+    assert emu.cursor == before_cursor
+
+
+@pytest.mark.parametrize("mode", [b"47", b"1047", b"1049"])
+def test_alternate_screen_modes(mode: bytes) -> None:
+    emu = TerminalEmulator(20, 3, 100)
+    emu.feed(b"main")
+    # Like xterm, entering keeps the cursor position; applications home it themselves.
+    emu.feed(b"\x1b[?" + mode + b"h")
+    assert emu.cursor.x == 4
+    emu.feed(b"\x1b[Halt")
+    assert emu.screen_lines_text()[0] == "alt"
+    emu.feed(b"\x1b[?" + mode + b"l")
+    assert emu.screen_lines_text()[0] == "main"
+
+
+def test_alternate_screen_does_not_fill_scrollback() -> None:
+    emu = TerminalEmulator(20, 3, 100)
+    emu.feed(b"a\r\nb\r\nc\r\nd")  # 1 line into scrollback
+    history = emu.history_len
+    emu.feed(b"\x1b[?1049h" + b"x\r\n" * 50)
+    assert emu.history_len == history
+    emu.feed(b"\x1b[?1049l")
+    assert emu.history_len == history
+
+
+def test_alternate_screen_enter_twice_and_leave_without_enter() -> None:
+    emu = TerminalEmulator(20, 3, 100)
+    emu.feed(b"keep")
+    emu.feed(b"\x1b[?1049l")  # leaving without entering: no change
+    assert emu.screen_lines_text()[0] == "keep"
+    emu.feed(b"\x1b[?1049h\x1b[?1049h")  # entering twice keeps the first saved screen
+    emu.feed(b"\x1b[?1049l")
+    assert emu.screen_lines_text()[0] == "keep"
+
+
+def test_alternate_screen_with_other_modes_in_same_sequence() -> None:
+    emu = TerminalEmulator(20, 3, 100)
+    emu.feed(b"\x1b[?1049;1h")  # alt screen + DECCKM together
+    assert emu.in_alt_screen and emu.app_cursor_keys
+    emu.feed(b"\x1b[?1049;1l")
+    assert not emu.in_alt_screen and not emu.app_cursor_keys
+
+
+def test_alternate_screen_survives_shrinking() -> None:
+    emu = TerminalEmulator(20, 6, 100)
+    emu.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6")
+    emu.feed(b"\x1b[?1049h")
+    emu.resize(20, 3)
+    emu.feed(b"\x1b[?1049l")
+    assert len(emu.screen_lines_text()) == 3
+    assert emu.cursor.y <= 2
+
+
+@pytest.mark.parametrize("final", list("@ABCDEFGHLMPXadefgmnr'"))
+def test_private_csi_variants_do_not_break_parsing(final: str) -> None:
+    """pyte 0.8.2 raises TypeError for e.g. ESC[?1;2m; the rest of the data must survive."""
+    emu = TerminalEmulator(20, 3, 100)
+    emu.feed(b"ok\x1b[?1;2" + final.encode() + b"-after")
+    assert emu.screen_lines_text()[0] == "ok-after"
+
+
+def test_parser_errors_are_logged_not_raised(monkeypatch, caplog) -> None:
+    import logging
+
+    emu = TerminalEmulator(20, 3, 100)
+
+    def boom(data: bytes) -> None:
+        raise RuntimeError("secret-ish payload")
+
+    monkeypatch.setattr(emu._stream, "feed", boom)
+    with caplog.at_level(logging.WARNING):
+        emu.feed(b"anything")
+    assert "terminal parser error: RuntimeError" in caplog.text
+    assert "payload" not in caplog.text

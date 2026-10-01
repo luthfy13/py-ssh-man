@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pyte.graphics import FG_BG_256
+
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
@@ -47,6 +49,12 @@ ANSI_NAME_TO_INDEX = {
 }
 
 
+# pyte reports 256-color indexes 0-15 as hex; map those values back to theme colors.
+# Indexes 16-255 (and truecolor values) with the same hex value map too, because pyte only
+# keeps the hex string (e.g. index 196 and index 9 are both "ff0000").
+_ANSI_HEX_TO_INDEX = {value.lower(): index for index, value in enumerate(FG_BG_256[:16])}
+
+
 def _is_hex6(value: str) -> bool:
     return len(value) == 6 and all(ch in _HEX_DIGITS for ch in value)
 
@@ -64,5 +72,8 @@ def resolve_color(
             index += 8
         return theme.ansi[index]
     if _is_hex6(value):
+        ansi_index = _ANSI_HEX_TO_INDEX.get(value.lower())
+        if ansi_index is not None:
+            return theme.ansi[ansi_index]
         return "#" + value.upper()
     return default

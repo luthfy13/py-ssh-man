@@ -34,8 +34,20 @@ def test_default() -> None:
 
 
 def test_hex_colors_uppercased() -> None:
-    assert _fg("ff0000") == "#FF0000"
+    assert _fg("12ab34") == "#12AB34"
     assert _bg("0a0b0c") == "#0A0B0C"
+
+
+def test_first_16_palette_hex_values_use_theme_colors() -> None:
+    """SHOULD (SPEC §8.2 rule 3): pyte hex for 256-color indexes 0-15 → theme.ansi."""
+    from pyte.graphics import FG_BG_256
+
+    for index, value in enumerate(FG_BG_256[:16]):
+        assert _fg(value) == T.ansi[index]
+        assert _bg(value.upper()) == T.ansi[index]
+    # pyte only keeps the hex value, so index 196 ("ff0000") maps like index 9.
+    assert FG_BG_256[196] == FG_BG_256[9]
+    assert _fg(FG_BG_256[196]) == T.ansi[9]
 
 
 @pytest.mark.parametrize("value", ["", "xyz", "12345", "1234567", "gggggg", "#ff0000"])
@@ -49,7 +61,7 @@ def test_bold_is_bright() -> None:
     assert _fg("red", bold=True, bright=False) == T.ansi[1]
     assert _fg("brightred", bold=True) == T.ansi[9]  # already bright
     assert _bg("red", bold=True) == T.ansi[1]  # background never brightened
-    assert _fg("ff0000", bold=True) == "#FF0000"
+    assert _fg("12ab34", bold=True) == "#12AB34"
 
 
 def test_theme_has_16_colors() -> None:
