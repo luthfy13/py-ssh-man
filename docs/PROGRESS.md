@@ -773,4 +773,13 @@ di-resize saat htop berjalan, `stty size` = grid widget (45×24).
 ### Tambahan setelah izin user — 2026-10-01
 - Workflow CI dipindahkan dari `docs/ci/github-actions-test.yml` ke `.github/workflows/test.yml`
   (aktif).
-- Tag `v0.1.0` dibuat dan di-push.
+- CI run #1 gagal karena asumsi platform di test (macOS 5, Windows 3; bukan bug aplikasi):
+  shortcut/zoom/teks sambutan diasumsikan Ctrl+Shift (macOS memakai Cmd), Backspace di panel
+  (menghapus di macOS sesuai §9.4), path `QUrl.toLocalFile()` memakai `/` di Windows, font database
+  Qt kosong di Windows + offscreen. Test diperbaiki agar sadar-platform.
+- **CI run #2 lulus** (commit `b737645`): Ubuntu 661 lulus; macOS 661 lulus; Windows 656 lulus,
+  5 dilewati (3 test izin POSIX, 2 test font karena font database offscreen kosong). Ini memenuhi
+  bagian unit test MT-9.0/AC-9.1 untuk Windows dan macOS (dengan plugin offscreen; uji manual MT-9.x
+  di desktop nyata tetap diperlukan).
+- Tag `v0.1.0` dibuat secara lokal, tetapi **push tag ditolak lingkungan sesi ini** (proxy git
+  memutus `git push` untuk ref tag; push branch berhasil). Tag perlu dibuat oleh pemilik repo.
