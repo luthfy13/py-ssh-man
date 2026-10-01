@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyssh"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6>=6.7",
+  "paramiko>=3.4",
+  "pyte>=0.8.2",
+  "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-qt>=4.4",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+]
+
+[project.gui-scripts]
+pyssh = "pyssh.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pyssh = ["resources/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+markers = ["integration: butuh server SSH uji (lihat §10.3)"]

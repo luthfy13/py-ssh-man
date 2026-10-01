@@ -1,0 +1,3 @@
+"""Tests for config (SPEC §10.2)."""
+
+from __future__ import annotations
