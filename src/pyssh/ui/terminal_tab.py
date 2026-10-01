@@ -18,12 +18,13 @@ from PySide6.QtWidgets import (
 )
 
 from pyssh import strings
+from pyssh.core.key_loader import KeyLoadError, PassphraseRequired, load_private_key
 from pyssh.core.ssh_worker import ConnectParams, HostKeyDecision, WorkerProtocol
 from pyssh.models import AuthType, SessionConfig
 from pyssh.services import AppServices
 from pyssh.terminal.view import TerminalView
 from pyssh.terminal.widget import TerminalWidget
-from pyssh.ui.dialogs import HostKeyDialog, PasswordDialog
+from pyssh.ui.dialogs import HostKeyDialog, PasswordDialog, wait_cursor
 from pyssh.ui.vault_dialogs import ensure_vault_unlocked
 
 log = logging.getLogger(__name__)
@@ -203,8 +204,57 @@ class TerminalTab(QWidget):
     # ----- credential flow --------------------------------------------------------------
 
     def _connect_with_key(self) -> None:
-        # Private key authentication is implemented in Phase 7.
-        self._fail(strings.E_UNKNOWN.format(name="private key"))
+        path = self._session.key_path or ""
+        try:
+            with wait_cursor():
+                pkey = load_private_key(path)
+        except PassphraseRequired:
+            pkey = self._load_key_with_passphrase(path)
+            if pkey is None:
+                return
+        except KeyLoadError as exc:
+            self._fail(exc.message)
+            return
+        self._start_worker(pkey=pkey)
+
+    def _load_key_with_passphrase(self, path: str):  # -> paramiko.PKey | None
+        """Stored passphrase first, then up to 3 prompts (SPEC §9.6.3 step 2)."""
+        candidate = None
+        if self._session.remember_secret and not self._adhoc:
+            candidate = self._services.secret_store.get_secret(self._session.id)
+        error: str | None = None
+        prompts = 0
+        while True:
+            if candidate is None:
+                if prompts >= MAX_PASSWORD_ATTEMPTS:
+                    self._fail(strings.KEY_BAD_PASSPHRASE)
+                    return None
+                answer = PasswordDialog(
+                    title=strings.PASSPHRASE_TITLE,
+                    prompt=strings.PASSPHRASE_PROMPT.format(path=path),
+                    field_label=strings.PASSPHRASE_FIELD,
+                    remember_label=strings.PASSPHRASE_REMEMBER,
+                    error=error,
+                    show_remember=not self._adhoc,
+                    remember_default=self._session.remember_secret,
+                    parent=self,
+                ).ask()
+                prompts += 1
+                if answer is None:
+                    self._fail(strings.CANCELLED_BY_USER)
+                    return None
+                candidate = answer[0]
+                self._prompted = answer
+            try:
+                with wait_cursor():
+                    return load_private_key(path, candidate)
+            except KeyLoadError as exc:
+                if exc.code != "KEY_BAD_PASSPHRASE":
+                    self._fail(exc.message)
+                    return None
+                error = strings.PASSPHRASE_RETRY
+                candidate = None
+                self._prompted = None
 
     def _prompt_password_and_start(self, error: str | None) -> None:
         answer = PasswordDialog(

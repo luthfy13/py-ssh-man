@@ -363,3 +363,135 @@ def test_missing_worker_factory_raises(qtbot, services, session, prompts) -> Non
     tab = _tab(qtbot, session, services)
     with pytest.raises(RuntimeError):
         tab.connect_session()
+
+
+# ----- private key authentication (SPEC §9.6.3 steps 2 and 7) ---------------------------
+
+
+def _key_file(tmp_path, passphrase: str | None) -> str:
+    from cryptography.hazmat.primitives import serialization as ser
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    enc = ser.BestAvailableEncryption(passphrase.encode()) if passphrase else ser.NoEncryption()
+    path = tmp_path / ("id_pass" if passphrase else "id_plain")
+    path.write_bytes(
+        ed25519.Ed25519PrivateKey.generate().private_bytes(
+            ser.Encoding.PEM, ser.PrivateFormat.OpenSSH, enc
+        )
+    )
+    return str(path)
+
+
+def _key_session(services, key_path: str, **kwargs) -> SessionConfig:
+    from pyssh.models import AuthType
+
+    session = SessionConfig(
+        name="Key", host="h", username="u", auth_type=AuthType.KEY, key_path=key_path, **kwargs
+    )
+    services.session_store.add(session)
+    return session
+
+
+def test_key_without_passphrase(qtbot, services, factory, prompts, tmp_path) -> None:
+    session = _key_session(services, _key_file(tmp_path, None))
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert prompts.calls == []
+    worker = factory.last
+    assert worker.params.password is None
+    assert worker.params.pkey.get_name() == "ssh-ed25519"
+
+
+def test_key_passphrase_prompt_and_retry(qtbot, services, factory, prompts, tmp_path) -> None:
+    session = _key_session(services, _key_file(tmp_path, "good-phrase"))
+    prompts.answers = [("bad", False), ("good-phrase", False)]
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert [c["title"] for c in prompts.calls] == [strings.PASSPHRASE_TITLE] * 2
+    assert [c["error"] for c in prompts.calls] == [None, strings.PASSPHRASE_RETRY]
+    assert factory.last.params.pkey is not None
+    assert tab.state is TabState.CONNECTING
+
+
+def test_key_passphrase_three_wrong_fails(qtbot, services, factory, prompts, tmp_path) -> None:
+    session = _key_session(services, _key_file(tmp_path, "good-phrase"))
+    prompts.answers = [("a", False), ("b", False), ("c", False)]
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert len(prompts.calls) == 3
+    assert tab.state is TabState.FAILED
+    assert tab.message == strings.KEY_BAD_PASSPHRASE
+    assert factory.workers == []
+
+
+def test_key_passphrase_cancel(qtbot, services, factory, prompts, tmp_path) -> None:
+    session = _key_session(services, _key_file(tmp_path, "good-phrase"))
+    prompts.answers = [None]
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert tab.message == strings.CANCELLED_BY_USER
+
+
+def test_stored_passphrase_used(qtbot, services, factory, prompts, tmp_path) -> None:
+    services.vault.initialize(MASTER)
+    session = _key_session(services, _key_file(tmp_path, "good-phrase"))
+    services.secret_store.set_secret(session.id, "good-phrase")
+    session = services.session_store.get(session.id)
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert prompts.calls == []
+    assert factory.last.params.pkey is not None
+
+
+def test_wrong_stored_passphrase_prompts_and_saves(
+    qtbot, services, factory, prompts, tmp_path
+) -> None:
+    services.vault.initialize(MASTER)
+    session = _key_session(services, _key_file(tmp_path, "good-phrase"))
+    services.secret_store.set_secret(session.id, "old-wrong")
+    session = services.session_store.get(session.id)
+    prompts.answers = [("good-phrase", True)]
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert prompts.calls[0]["error"] == strings.PASSPHRASE_RETRY
+    assert services.secret_store.get_secret(session.id) == "old-wrong"
+    factory.last.connected.emit()
+    assert services.secret_store.get_secret(session.id) == "good-phrase"
+
+
+def test_key_load_error_fails(qtbot, services, factory, prompts, tmp_path) -> None:
+    ppk = tmp_path / "k.ppk"
+    ppk.write_text("PuTTY-User-Key-File-3: ssh-ed25519\n")
+    session = _key_session(services, str(ppk))
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert tab.state is TabState.FAILED
+    assert tab.message == strings.KEY_PPK_UNSUPPORTED
+
+
+def test_key_error_after_passphrase(
+    qtbot, services, factory, prompts, tmp_path, monkeypatch
+) -> None:
+    from pyssh.core.key_loader import KeyLoadError, PassphraseRequired
+
+    session = _key_session(services, _key_file(tmp_path, "good-phrase"))
+    calls = iter([PassphraseRequired(), KeyLoadError("KEY_INVALID", "rusak")])
+
+    def fake_load(path, passphrase=None):
+        raise next(calls)
+
+    monkeypatch.setattr(tab_module, "load_private_key", fake_load)
+    prompts.answers = [("x", False)]
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    assert tab.message == "rusak"
+
+
+def test_server_rejects_key(qtbot, services, factory, prompts, tmp_path) -> None:
+    session = _key_session(services, _key_file(tmp_path, None))
+    tab = _tab(qtbot, session, services)
+    tab.connect_session()
+    factory.last.auth_failed.emit("Autentikasi gagal")
+    assert tab.state is TabState.FAILED
+    assert tab.message == strings.KEY_REJECTED
+    assert len(factory.workers) == 1  # no retry for keys

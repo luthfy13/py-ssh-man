@@ -532,3 +532,79 @@ keluar 0)."; tombol R → menghubungkan ulang.
 
 ### Masalah yang diketahui
 - Tidak ada.
+
+## Fase 7 — Autentikasi Private Key — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, offscreen), Python 3.12.3, paramiko 5.0.0,
+cryptography 50.0.2
+
+### Verifikasi perilaku paramiko (§7.8: "wajib dibuktikan dengan key nyata")
+Key dibuat dengan `cryptography` lalu dimuat dengan `paramiko.PKey.from_path`:
+
+| Kasus | Perilaku nyata paramiko 5.0.0 | Asumsi §7.8 |
+|---|---|---|
+| Parameter passphrase | bernama `password` dan **wajib `bytes`** (`str` → `TypeError: password must be bytes`) | `passphrase=` |
+| Key terenkripsi tanpa password | `TypeError` ("…password was not provided" / "Password was not given…") | `PasswordRequiredException` |
+| Password salah | `ValueError` (OpenSSH: pesan menyesatkan "no BEGIN/END delimiters"; PEM: "Incorrect password") | `PasswordRequiredException`/`SSHException` |
+| Password untuk key tidak terenkripsi | `TypeError` ("Password was given but private key is not encrypted") | — |
+| Key DSA | `UnknownKeyType` | sama |
+| PKCS#8 (terenkripsi maupun tidak) | `SSHException` "not a valid … private key file", bahkan dengan password benar | — |
+| File sampah | `ValueError` | sama |
+
+`load_private_key()` mengikuti tabel di atas: passphrase dikodekan UTF-8; `TypeError` tanpa passphrase →
+`PassphraseRequired`; passphrase untuk key tidak terenkripsi → dimuat ulang tanpa passphrase;
+`ValueError`/`SSHException` → `KEY_BAD_PASSPHRASE` (bila passphrase diberikan) atau `KEY_INVALID`;
+header PKCS#8 dideteksi lebih dulu → `KEY_INVALID` dengan petunjuk `ssh-keygen -p -f <file>`.
+
+### Yang dikerjakan
+- 7.1 `core/key_loader.py`: `KeyLoadError(code, message)`, `PassphraseRequired`,
+  `load_private_key()` (ekspansi `~`, `KEY_NOT_FOUND`, `KEY_PPK_UNSUPPORTED` dengan instruksi
+  PuTTYgen/puttygen, `KEY_BAD_PASSPHRASE`, `KEY_UNSUPPORTED_TYPE`, `KEY_INVALID`).
+- 7.2 Field key di `SessionDialog` (sudah dari Fase 5): tombol Telusuri, filter "Semua file (*)",
+  folder awal `~/.ssh`.
+- 7.3 `TerminalTab`: key tanpa passphrase langsung dipakai; key terenkripsi → passphrase tersimpan
+  (bila ada) lalu prompt "Passphrase" maks. 3× dengan pesan "Passphrase salah, coba lagi."; error
+  key lain → FAILED dengan pesannya; server menolak key → "Server menolak private key ini."
+  (tanpa retry); passphrase dari prompt disimpan hanya setelah tersambung; kursor tunggu selama
+  memuat key (pengecualian A1).
+- 7.4 Test: `test_key_loader` (14 kasus), tambahan `test_terminal_tab` (9 kasus key),
+  `integration/test_ssh_key` (3 kasus).
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 617 lulus, 0 gagal |
+| pytest (integration) | 19 lulus, 1 dilewati (audit secret butuh password unik, lihat Fase 5) |
+| Coverage modul target | key_loader 91 % |
+
+### Kriteria penerimaan
+- [x] AC-7.1 Quality Gate lulus; coverage `core/key_loader` ≥ 90 %.
+- [x] AC-7.2 Semua kasus `test_key_loader` §10.2 (Ed25519 OpenSSH dengan & tanpa passphrase, RSA PEM,
+  ECDSA; tanpa passphrase → `PassphraseRequired`; salah → `KEY_BAD_PASSPHRASE`; PuTTY →
+  `KEY_PPK_UNSUPPORTED`; tidak ada → `KEY_NOT_FOUND`; sampah → `KEY_INVALID`; path `~`) dan
+  `test_ssh_key` (login Ed25519 tanpa & dengan passphrase dari `ssh-keygen`; key tak terdaftar →
+  `auth_failed`) lulus.
+
+Verifikasi tambahan tanpa layar (alur aplikasi nyata): sesi key `id_ed25519_pass` dengan "Simpan"
+dicentang → prompt "Passphrase" sekali → tersambung → passphrase tersimpan terenkripsi; sesi dibuka
+lagi → tersambung tanpa prompt.
+
+### Checklist manual (diisi user)
+- [ ] MT-7.1 Login dengan key Ed25519 tanpa passphrase. — OS: — hasil:
+- [ ] MT-7.2 Login dengan key berpassphrase; centang simpan → restart, buka vault → koneksi berikutnya
+  tanpa prompt. — OS: — hasil:
+- [ ] MT-7.3 Passphrase salah → pesan jelas dan prompt ulang (maks. 3×). — OS: — hasil:
+- [ ] MT-7.4 Pilih file `.ppk` → pesan instruksi konversi. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- Pemanggilan `PKey.from_path` memakai `password=<bytes>` (nama & tipe sesuai paramiko 5.0.0),
+  bukan `passphrase=<str>` seperti tertulis di §7.8.
+- PKCS#8 (`BEGIN PRIVATE KEY` / `BEGIN ENCRYPTED PRIVATE KEY`) tidak didukung paramiko 5.0.0; dilaporkan
+  sebagai `KEY_INVALID` dengan petunjuk konversi, bukan pesan "passphrase salah" yang menyesatkan.
+- Passphrase tersimpan yang salah tidak dihitung sebagai salah satu dari 3 percobaan prompt.
+
+### Masalah yang diketahui
+- Key PKCS#8 harus dikonversi ke format OpenSSH (`ssh-keygen -p -f <file>`) sebelum dipakai.

@@ -21,6 +21,8 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   penyimpanan password/passphrase terenkripsi, halaman sambutan, posisi jendela tersimpan.
 - Fase 6: banyak tab dengan judul unik dan ikon status, konfirmasi tutup tab/aplikasi, klik tengah
   menutup tab, penutupan aplikasi menghentikan semua sesi dan mengunci vault.
+- Fase 7: login dengan private key Ed25519/ECDSA/RSA (OpenSSH & PEM) dan passphrase (bisa
+  disimpan terenkripsi); file `.ppk` dan PKCS#8 dideteksi dengan petunjuk konversi.
 
 ### Diperbaiki
 - Alasan terputus kadang salah ("Koneksi terputus.") karena OpenSSH mengirim EOF sebelum

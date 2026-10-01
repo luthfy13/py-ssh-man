@@ -224,3 +224,18 @@ CLOSE_TAB_TITLE = "Tutup Tab"
 CLOSE_TAB_CONFIRM = "Sesi masih terhubung. Tutup tab?"
 QUIT_TITLE = "Keluar"
 QUIT_CONFIRM = "Ada {n} sesi aktif. Keluar dari {app}?"
+
+# --- Private keys (SPEC §7.8) ---
+KEY_NOT_FOUND = "File private key tidak ditemukan: {path}"
+KEY_PPK_UNSUPPORTED = (
+    "File .ppk (PuTTY) tidak didukung. Konversi ke format OpenSSH: PuTTYgen → Load → "
+    "Conversions → Export OpenSSH key, atau di Linux/macOS: "
+    "puttygen key.ppk -O private-openssh -o id_key"
+)
+KEY_PKCS8_UNSUPPORTED = (
+    "Format PKCS#8 tidak didukung. Ubah ke format OpenSSH dengan: ssh-keygen -p -f {path}"
+)
+KEY_BAD_PASSPHRASE = "Passphrase salah."
+KEY_UNSUPPORTED_TYPE = "Jenis private key tidak didukung (hanya Ed25519, ECDSA, dan RSA)."
+KEY_INVALID = "File bukan private key yang valid: {path}"
+PASSPHRASE_RETRY = "Passphrase salah, coba lagi."
