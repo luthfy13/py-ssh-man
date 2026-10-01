@@ -404,3 +404,72 @@ keluar 0)."; tombol R → menghubungkan ulang.
 ### Masalah yang diketahui
 - MT-4.7 (koneksi putus mendadak) bergantung pada keepalive 30 s + perilaku TCP OS; hanya bisa
   diverifikasi manual.
+
+## Fase 5 — Manajemen Sesi — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, offscreen), Python 3.12.3
+
+### Yang dikerjakan
+- 5.1 `ui/session_dialog.py`: form §9.5 (nama ≤ 64 & unik, host tanpa spasi dengan bracket IPv6
+  dibuang, port 1–65535, username, metode Password/Private key, file key + Telusuri, passphrase,
+  checkbox simpan, keterangan vault), tombol Simpan nonaktif selama invalid, label error field
+  pertama, placeholder "(tersimpan — …)", aturan simpan/hapus secret §6.6/§9.5, ganti metode
+  menghapus secret lama.
+- 5.2 `ui/session_panel.py`: filter "Cari sesi…", daftar dua baris + tooltip, tombol +Baru/Edit/Hapus,
+  Enter/klik dua kali → buka, F2 → edit, Delete (Backspace di macOS) → hapus dengan konfirmasi,
+  menu konteks Buka/Edit/Duplikat/Hapus/Lupakan Host Key, label daftar kosong.
+- 5.3 `MainWindow`: `QSplitter` (panel 240 px | `QStackedWidget` sambutan/tab), menu Sesi Baru
+  (shortcut tabel), Panel Sesi (toggle), geometri/state/splitter disimpan ke `settings.json` saat
+  jendela ditutup dan dipulihkan saat dibuka.
+- 5.4 Alur secret di `TerminalTab` (§9.6.3 langkah 2, 5, 7) — dibuat di Fase 4, diuji lagi di sini.
+- 5.5 Test: `test_session_dialog`, `test_session_panel`, tambahan `test_main_window`,
+  `integration/test_secret_audit`.
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus |
+| pytest (unit) | 585 lulus, 0 gagal |
+| pytest (integration) | default `PYSSH_TEST_PASSWORD=secret`: 12 lulus, 1 dilewati (audit, lihat di bawah); dengan password unik: **13 lulus** |
+| Coverage | session_dialog 99 %, session_panel 97 %, main_window 100 % |
+
+### Kriteria penerimaan
+- [x] AC-5.1 Quality Gate lulus.
+- [x] AC-5.2 `test_secret_audit` lulus (N-01) dengan password server unik `secret-Z9q7-unique`:
+  alur nyata prompt → login SSH → simpan lewat vault → tutup DB; password login dan master password
+  tidak ditemukan sebagai bytes UTF-8 di file mana pun di folder data (`pyssh.db`, `known_hosts`,
+  log level DEBUG termasuk logger paramiko).
+- [x] AC-5.3 `test_terminal_tab::test_secret_saved_only_after_connected`,
+  `test_wrong_stored_secret_is_replaced`, `test_failed_connection_does_not_save` dan
+  `test_session_dialog::test_secret_saved_immediately_when_vault_open` lulus.
+
+### Checklist manual (diisi user)
+- [ ] MT-5.1 Tambah, edit, duplikat, hapus sesi lewat UI; restart aplikasi → data tetap. — OS: — hasil:
+- [ ] MT-5.2 Sesi dengan "Simpan password" → restart → buka vault → koneksi tanpa prompt.
+  — OS: — hasil:
+- [ ] MT-5.3 Restart → **Lewati** vault → koneksi meminta password. — OS: — hasil:
+- [ ] MT-5.4 Buka `pyssh.db` dengan `sqlite3` CLI / DB Browser for SQLite → kolom `ciphertext`
+  berupa data biner, password tidak terbaca. — OS: — hasil:
+- [ ] MT-5.5 Pencarian memfilter berdasarkan nama/host/user. — OS: — hasil:
+- [ ] MT-5.6 Klik kanan sesi → Lupakan Host Key → koneksi berikutnya menampilkan dialog fingerprint
+  lagi. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- **Audit secret butuh password uji unik.** Dengan password default `secret`, pencarian byte selalu
+  "menemukan" kata itu di skema database (tabel `secrets`), jadi test di-skip dengan alasan tertulis
+  bila `PYSSH_TEST_PASSWORD` < 12 karakter. Untuk AC-5.2 password user `tester` di server uji diganti
+  sementara menjadi `secret-Z9q7-unique` lalu dikembalikan. Server Docker (§10.3 Opsi A) bisa
+  dijalankan dengan `-e USER_PASSWORD=secret-Z9q7-unique` dan `PYSSH_TEST_PASSWORD` yang sama.
+- Field private key, tombol Telusuri, dan passphrase di `SessionDialog` sudah dibuat di fase ini
+  (tugas 7.2) karena satu form; login dengan key tetap dikerjakan di Fase 7.
+- Keterangan vault di bawah checkbox selalu tampil sesuai state (bukan hanya saat dicentang).
+- Peringatan database rusak tetap ditampilkan oleh `app.main()` setelah jendela muncul (satu kali),
+  bukan oleh `SessionPanel`.
+- Saat sesi disimpan dengan "Simpan" dicentang dan field secret diisi, sesi disimpan dulu dengan
+  `remember_secret = 0`; flag menjadi 1 hanya setelah secret benar-benar tersimpan.
+- `MainWindow.closeEvent` sudah menyimpan geometri; penghentian semua sesi ditambahkan di Fase 6.
+
+### Masalah yang diketahui
+- Tidak ada.

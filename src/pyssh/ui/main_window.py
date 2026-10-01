@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
-from PySide6.QtCore import QKeyCombination, Qt
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QLabel, QMainWindow, QTabWidget, QWidget
+from PySide6.QtCore import QByteArray, QKeyCombination, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtWidgets import (
+    QLabel,
+    QMainWindow,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
+    QWidget,
+)
 
 from pyssh import config, shortcuts, strings
 from pyssh.core.vault import VaultState
@@ -15,6 +23,7 @@ from pyssh.services import AppServices
 from pyssh.terminal.demo_backend import DemoBackend
 from pyssh.terminal.view import TerminalView
 from pyssh.terminal.widget import TerminalWidget
+from pyssh.ui.session_panel import SessionPanel
 from pyssh.ui.terminal_tab import TerminalTab
 from pyssh.ui.vault_dialogs import (
     ChangeMasterPasswordDialog,
@@ -25,6 +34,7 @@ from pyssh.ui.vault_dialogs import (
 
 INITIAL_WIDTH = 1200
 INITIAL_HEIGHT = 750
+PANEL_WIDTH = 240
 
 _VAULT_STATE_TEXT = {
     VaultState.UNINITIALIZED: strings.VAULT_STATE_UNINITIALIZED,
@@ -61,7 +71,28 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._on_current_tab_changed)
-        self.setCentralWidget(self.tabs)
+
+        self.welcome = QLabel(
+            strings.WELCOME.format(
+                shortcut=key_sequences("new_session")[0].toString(
+                    QKeySequence.SequenceFormat.NativeText
+                )
+            )
+        )
+        self.welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.welcome.setWordWrap(True)
+        self.content = QStackedWidget()
+        self.content.addWidget(self.welcome)
+        self.content.addWidget(self.tabs)
+
+        self.session_panel = SessionPanel(services)
+        self.session_panel.open_requested.connect(self.open_session)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.addWidget(self.session_panel)
+        self.splitter.addWidget(self.content)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([PANEL_WIDTH, INITIAL_WIDTH - PANEL_WIDTH])
+        self.setCentralWidget(self.splitter)
 
         self._build_menus()
         self.state_label = QLabel()
@@ -72,6 +103,8 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.grid_label)
         services.vault.add_listener(lambda _state: self.refresh_vault_ui())
         self.refresh_vault_ui()
+        self._restore_geometry()
+        self._update_content()
 
     @property
     def services(self) -> AppServices:
@@ -82,6 +115,11 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu(strings.MENU_FILE)
+        self.action_new_session = self._action(
+            strings.ACTION_NEW_SESSION, self.new_session, "new_session"
+        )
+        file_menu.addAction(self.action_new_session)
+        file_menu.addSeparator()
         self.action_vault_create = self._action(strings.ACTION_VAULT_CREATE, self._vault_create)
         self.action_vault_unlock = self._action(strings.ACTION_VAULT_UNLOCK, self._vault_unlock)
         self.action_vault_lock = self._action(strings.ACTION_VAULT_LOCK, self._vault_lock)
@@ -129,6 +167,23 @@ class MainWindow(QMainWindow):
         )
         for action in (self.action_zoom_in, self.action_zoom_out, self.action_zoom_reset):
             view_menu.addAction(action)
+        self.action_toggle_panel = self._action(
+            strings.ACTION_TOGGLE_PANEL, self.toggle_session_panel, "toggle_panel"
+        )
+        self.action_toggle_panel.setCheckable(True)
+        self.action_toggle_panel.setChecked(True)
+        view_menu.addSeparator()
+        view_menu.addAction(self.action_toggle_panel)
+
+    def new_session(self) -> None:
+        """Create a session (Berkas → Sesi Baru…)."""
+        self.session_panel.new_session()
+
+    def toggle_session_panel(self) -> None:
+        """Show or hide the session panel."""
+        visible = not self.session_panel.isVisible()
+        self.session_panel.setVisible(visible)
+        self.action_toggle_panel.setChecked(visible)
 
     def _action(
         self, text: str, slot: Callable[[], object], shortcut_action: str | None = None
@@ -221,6 +276,7 @@ class MainWindow(QMainWindow):
             )
         index = self.tabs.addTab(view, title)
         self.tabs.setCurrentIndex(index)
+        self._update_content()
         view.setFocus()
         return index
 
@@ -243,6 +299,7 @@ class MainWindow(QMainWindow):
             widget.close_session()
         self.tabs.removeTab(index)
         widget.deleteLater()
+        self._update_content()
 
     def close_current_tab(self) -> None:
         """Close the active tab."""
@@ -279,3 +336,40 @@ class MainWindow(QMainWindow):
 
     def _show_grid(self, cols: int, rows: int) -> None:
         self.grid_label.setText(strings.GRID_SIZE.format(cols=cols, rows=rows))
+
+    def _update_content(self) -> None:
+        self.content.setCurrentWidget(self.tabs if self.tabs.count() else self.welcome)
+
+    # ----- window state -----------------------------------------------------------------
+
+    def _restore_geometry(self) -> None:
+        settings = self._services.settings_store.current
+        if settings.window_geometry:
+            self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode("ascii")))
+        if settings.window_state:
+            self.restoreState(QByteArray.fromBase64(settings.window_state.encode("ascii")))
+        if settings.splitter_state:
+            self.splitter.restoreState(
+                QByteArray.fromBase64(settings.splitter_state.encode("ascii"))
+            )
+
+    def save_window_state(self) -> None:
+        """Store geometry, window state and splitter position in ``settings.json``."""
+        store = self._services.settings_store
+
+        def encode(data: QByteArray) -> str:
+            return bytes(data.toBase64()).decode("ascii")
+
+        store.save(
+            replace(
+                store.current,
+                window_geometry=encode(self.saveGeometry()),
+                window_state=encode(self.saveState()),
+                splitter_state=encode(self.splitter.saveState()),
+            )
+        )
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Save the window state (session shutdown is added in Phase 6)."""
+        self.save_window_state()
+        super().closeEvent(event)

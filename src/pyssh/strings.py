@@ -174,3 +174,47 @@ SECRET_NOT_SAVED_VAULT = "Password tidak disimpan karena vault tidak dibuka."
 
 # --- Command line ---
 ERR_CONNECT_ARG = "format --connect harus user@host[:port]"
+
+# --- Session dialog (SPEC §9.5) ---
+SESSION_NEW_TITLE = "Sesi Baru"
+SESSION_EDIT_TITLE = "Edit Sesi"
+FIELD_NAME = "Nama:"
+FIELD_HOST = "Host:"
+FIELD_PORT = "Port:"
+FIELD_USERNAME = "Username:"
+FIELD_AUTH = "Metode login:"
+AUTH_PASSWORD = "Password"
+AUTH_KEY = "Private key"
+FIELD_PASSWORD = "Password:"
+FIELD_KEY_PATH = "File private key:"
+FIELD_PASSPHRASE = "Passphrase:"
+BROWSE = "Telusuri…"
+BROWSE_TITLE = "Pilih File Private Key"
+BROWSE_FILTER = "Semua file (*)"
+REMEMBER_SECRET = "Simpan password/passphrase"
+SECRET_STORED_PLACEHOLDER = "(tersimpan — kosongkan untuk tidak mengubah)"
+VAULT_HINT_CREATE = "Anda akan diminta membuat master password."
+VAULT_HINT_UNLOCK = "Anda akan diminta membuka vault."
+BUTTON_SAVE = "Simpan"
+ERR_KEY_FILE_MISSING = "File private key tidak ditemukan."
+SESSION_SAVED_WITHOUT_SECRET = "Sesi disimpan tanpa password karena vault tidak dibuka."
+
+# --- Session panel (SPEC §9.4) ---
+SEARCH_PLACEHOLDER = "Cari sesi…"
+BUTTON_NEW = "+ Baru"
+BUTTON_EDIT = "Edit"
+BUTTON_DELETE = "Hapus"
+PANEL_EMPTY = "Belum ada sesi. Klik + Baru."
+MENU_OPEN = "Buka"
+MENU_EDIT = "Edit…"
+MENU_DUPLICATE = "Duplikat"
+MENU_DELETE = "Hapus…"
+MENU_FORGET_HOST_KEY = "Lupakan Host Key"
+DELETE_TITLE = "Hapus Sesi"
+DELETE_CONFIRM = 'Hapus sesi "{name}"? Password/passphrase tersimpannya ikut dihapus.'
+FORGET_TITLE = "Lupakan Host Key"
+FORGET_DONE = "Host key untuk {target} telah dihapus. Koneksi berikutnya akan meminta konfirmasi."
+FORGET_NONE = "Tidak ada host key tersimpan untuk {target}."
+
+# --- Welcome page ---
+WELCOME = "Klik dua kali sebuah sesi untuk membuka, atau tekan {shortcut} untuk membuat sesi baru."

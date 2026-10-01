@@ -228,3 +228,63 @@ def test_banner_close_and_info_message(
     assert window.statusBar().currentMessage() == strings.SECRET_NOT_SAVED_VAULT
     tab.close_requested.emit()
     assert window.tabs.count() == 0
+
+
+def test_welcome_page_and_tabs(window: MainWindow, fake_workers, password_answer) -> None:
+    assert window.content.currentWidget() is window.welcome
+    assert "Ctrl+Shift+N" in window.welcome.text()
+    window.open_adhoc("u", "h")
+    assert window.content.currentWidget() is window.tabs
+    window.close_tab(0)
+    assert window.content.currentWidget() is window.welcome
+
+
+def test_panel_open_request_opens_tab(
+    window: MainWindow, services, fake_workers, password_answer
+) -> None:
+    from pyssh.models import SessionConfig
+
+    session = SessionConfig(name="Web", host="h", username="u")
+    services.session_store.add(session)
+    window.session_panel.refresh()
+    window.session_panel.select(session.id)
+    window.session_panel.open_selected()
+    assert window.tabs.tabText(0) == "Web"
+    assert window.active_tab().session.id == session.id
+
+
+def test_new_session_action_and_panel_toggle(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch, qtbot
+) -> None:
+    window.show()
+    qtbot.waitExposed(window)
+    calls: list[bool] = []
+    monkeypatch.setattr(window.session_panel, "new_session", lambda: calls.append(True))
+    window.action_new_session.trigger()
+    assert calls == [True]
+    assert window.session_panel.isVisible()
+    window.action_toggle_panel.trigger()
+    assert not window.session_panel.isVisible()
+    assert not window.action_toggle_panel.isChecked()
+    window.action_toggle_panel.trigger()
+    assert window.session_panel.isVisible()
+
+
+def test_geometry_saved_and_restored(services, qtbot) -> None:
+    first = MainWindow(services)
+    qtbot.addWidget(first)
+    first.resize(700, 500)  # must fit the offscreen screen (800x800); Qt clamps otherwise
+    first.show()
+    qtbot.waitExposed(first)
+    first.splitter.setSizes([300, 400])
+    first.close()
+    saved = services.settings_store.current
+    assert saved.window_geometry and saved.window_state and saved.splitter_state
+    reloaded = services.settings_store.load()
+    assert reloaded.window_geometry == saved.window_geometry
+    second = MainWindow(services)
+    qtbot.addWidget(second)
+    second.show()
+    qtbot.waitExposed(second)
+    assert second.size() == first.size()
+    assert second.splitter.sizes()[0] == first.splitter.sizes()[0]

@@ -17,6 +17,8 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   mode `--demo` dengan key inspector, benchmark emulator.
 - Fase 4: koneksi SSH dengan password di thread worker, verifikasi host key (TOFU), pemetaan
   error, tab terminal dengan state, banner reconnect, `--connect user@host[:port]`.
+- Fase 5: panel sesi (cari, buat, edit, duplikat, hapus, lupakan host key), dialog sesi dengan
+  penyimpanan password/passphrase terenkripsi, halaman sambutan, posisi jendela tersimpan.
 
 ### Diperbaiki
 - Alasan terputus kadang salah ("Koneksi terputus.") karena OpenSSH mengirim EOF sebelum
