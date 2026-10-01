@@ -38,11 +38,18 @@ def test_option_as_meta_only_on_mac(dialog_factory) -> None:
     assert not dialog_factory(mac=True).option_meta_check.isHidden()
 
 
+def _available_monospace(dialog: SettingsDialog) -> str:
+    """A monospace family installed on this machine (the combo lists only those)."""
+    assert dialog.font_combo.count() > 0
+    return dialog.font_combo.itemText(0)
+
+
 def test_save_persists(dialog_factory, services) -> None:
     dialog = dialog_factory(mac=False)
+    family = _available_monospace(dialog)
     dialog.font_auto_check.setChecked(False)
     assert dialog.font_combo.isEnabled()
-    dialog.font_combo.setCurrentFont(QFont("DejaVu Sans Mono"))
+    dialog.font_combo.setCurrentFont(QFont(family))
     dialog.font_size_spin.setValue(14)
     dialog.scrollback_spin.setValue(2000)
     dialog.copy_check.setChecked(False)
@@ -53,7 +60,7 @@ def test_save_persists(dialog_factory, services) -> None:
     dialog.save_button.click()
     expected = replace(
         services.settings_store.current,
-        font_family="DejaVu Sans Mono",
+        font_family=dialog.font_combo.currentFont().family(),
         font_size=14,
         scrollback_lines=2000,
         copy_on_select=False,
@@ -67,9 +74,8 @@ def test_save_persists(dialog_factory, services) -> None:
 
 
 def test_existing_font_preselected(dialog_factory, services) -> None:
-    services.settings_store.save(
-        replace(services.settings_store.current, font_family="DejaVu Sans Mono")
-    )
+    family = _available_monospace(dialog_factory(mac=False))
+    services.settings_store.save(replace(services.settings_store.current, font_family=family))
     dialog = dialog_factory(mac=False)
     assert not dialog.font_auto_check.isChecked()
-    assert dialog.font_combo.currentFont().family() == "DejaVu Sans Mono"
+    assert dialog.font_combo.currentFont().family() == family

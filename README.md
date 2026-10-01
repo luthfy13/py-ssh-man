@@ -54,6 +54,10 @@ python -m pyssh --debug                 # log level DEBUG
 python -m pyssh --version
 ```
 
+Catatan Windows: perintah `pyssh` dipasang sebagai *gui-script* (tanpa jendela konsol), sehingga
+keluaran `pyssh --version` kemungkinan tidak terlihat di terminal; gunakan
+`python -m pyssh --version`.
+
 ### Folder data
 
 | OS | Lokasi |
@@ -136,6 +140,11 @@ Tanpa Docker (container/VM Linux, sebagai root): pasang `openssh-server`, buat u
 `tests/integration/test_secret_audit.py` mencari password login sebagai bytes di semua file folder
 data, sehingga butuh password uji yang **unik** (≥ 12 karakter, mis. `secret-Z9q7-unique`) di server
 dan di `PYSSH_TEST_PASSWORD`; dengan password `secret` test ini di-skip.
+
+### CI (belum aktif)
+
+`docs/ci/github-actions-test.yml` menjalankan unit test di Ubuntu, Windows, dan macOS. GitHub hanya
+menjalankan workflow di `.github/workflows/`; pindahkan file itu ke sana untuk mengaktifkannya.
 
 ### Alat bantu
 

@@ -2,33 +2,42 @@
 
 Semua perubahan penting pada PySSH dicatat di file ini.
 
-## [Belum dirilis]
+## [0.1.0] — 2026-10-01
+
+Rilis sumber pertama (dijalankan dengan Python; tanpa paket installer). Tag git `v0.1.0` dibuat
+setelah ada izin pemilik repository.
 
 ### Ditambahkan
-- Fase 0: kerangka proyek (`pyproject.toml`, struktur paket `src/pyssh`, `python -m pyssh`
-  menampilkan jendela kosong "PySSH"), konfigurasi test (`pytest`, `pytest-qt`), dan
-  dokumen `docs/SPEC.md` (v2.1) serta `docs/PROGRESS.md`.
-- Fase 1: lokasi folder data per OS, database SQLite (skema v1, penanganan file rusak dan versi
-  lebih baru), penyimpanan sesi, pengaturan `settings.json`, log berputar, `--version`.
-- Fase 2: vault master password (scrypt + AES-256-GCM), penyimpanan secret terenkripsi, dialog
-  buat/buka/ganti/reset master password, status vault di menu dan status bar.
-- Fase 3: emulator terminal (pyte + scrollback), widget terminal (render, keyboard lintas
-  platform, seleksi, clipboard, bracketed paste, zoom, backpressure), tabel shortcut per platform,
-  mode `--demo` dengan key inspector, benchmark emulator.
-- Fase 4: koneksi SSH dengan password di thread worker, verifikasi host key (TOFU), pemetaan
-  error, tab terminal dengan state, banner reconnect, `--connect user@host[:port]`.
-- Fase 5: panel sesi (cari, buat, edit, duplikat, hapus, lupakan host key), dialog sesi dengan
-  penyimpanan password/passphrase terenkripsi, halaman sambutan, posisi jendela tersimpan.
-- Fase 6: banyak tab dengan judul unik dan ikon status, konfirmasi tutup tab/aplikasi, klik tengah
-  menutup tab, penutupan aplikasi menghentikan semua sesi dan mengunci vault.
-- Fase 7: login dengan private key Ed25519/ECDSA/RSA (OpenSSH & PEM) dan passphrase (bisa
-  disimpan terenkripsi); file `.ppk` dan PKCS#8 dideteksi dengan petunjuk konversi.
-- Fase 8: alternate screen (vim/htop/less kembali ke layar sebelumnya), dialog Pengaturan, menu
-  Bantuan (folder data, file log, Tentang), judul OSC di tooltip tab, primary selection Linux, ikon
-  aplikasi, README; optimasi aliran data (Ctrl+C saat flood ≤ 2 s).
+- **Sesi tersimpan** di SQLite: tambah, edit, duplikat, hapus, cari (nama/host/user), "Lupakan
+  Host Key".
+- **Vault master password**: password/passphrase disimpan terenkripsi AES-256-GCM dengan kunci dari
+  scrypt (N=2¹⁷); buat, buka (bisa dilewati), kunci, ganti, reset bila lupa.
+- **Koneksi SSH** di thread worker: password (retry maks. 3×) dan private key Ed25519/ECDSA/RSA
+  (OpenSSH & PEM) dengan passphrase; verifikasi host key TOFU dengan dialog fingerprint; pesan error
+  yang jelas (DNS, timeout, port tertutup, host key berubah, dst.); `--connect user@host[:port]`.
+- **Terminal xterm-256color** (pyte): 16/256/truecolor, atribut teks, karakter lebar, scrollback,
+  seleksi (drag, double-click kata), copy/paste dengan bracketed paste, primary selection di Linux,
+  zoom font, alternate screen untuk vim/htop/less/nano, resize PTY otomatis.
+- **Keyboard lintas platform**: tabel shortcut per platform (macOS memakai Cmd), AltGr, Option
+  sebagai Meta (macOS, opsional), key inspector di mode `--demo`.
+- **Multi-tab**: judul unik, ikon status, banner reconnect (tombol atau R/Enter), konfirmasi tutup
+  tab/aplikasi, penutupan aplikasi menghentikan semua sesi dan mengunci vault.
+- **Pengaturan** (font, ukuran, scrollback, salin otomatis, warna tebal, konfirmasi, keepalive,
+  timeout), posisi jendela tersimpan, menu Bantuan (folder data, file log, Tentang).
+- Log berputar tanpa secret, `--debug`, `--version`, instrumentasi `PYSSH_DEBUG_PERF=1`.
+- Alat bantu: `tools/make_ansi_demo.py`, `tools/make_icon.py`, `tools/bench_emulator.py`.
+- 661 unit test dan 20 test integrasi (server SSH nyata), test arsitektur (batas impor Qt, teks UI
+  dari `strings.py`, tanpa `print`, tanpa `sys.platform` di luar `config.py`).
 
-### Diperbaiki
+### Diperbaiki (ditemukan selama pengembangan)
 - Alasan terputus kadang salah ("Koneksi terputus.") karena OpenSSH mengirim EOF sebelum
   `exit-status`.
 - Urutan CSI privat (mis. `ESC[?1;2m`) membuat pyte 0.8.2 melempar `TypeError` dan sebagian output
   hilang (terlihat saat menjalankan vim/htop).
+- pyte 0.8.2 menamai latar SGR 105 `"bfightmagenta"`; kini dikenali sebagai bright magenta.
+- Ctrl+C saat output membanjir butuh > 6 s; aliran data diatur ulang (window channel 128 KiB,
+  backpressure 256 KiB) → ±1 s.
+
+### Batasan yang diketahui
+Lihat bagian "Batasan yang diketahui" di `README.md` (antara lain: key PKCS#8 dan `.ppk` perlu
+dikonversi, tanpa mouse reporting, seleksi hilang saat ada output baru).

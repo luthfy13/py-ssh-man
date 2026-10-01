@@ -712,3 +712,60 @@ di-resize saat htop berjalan, `stty size` = grid widget (45×24).
 ### Masalah yang diketahui
 - Primary selection hanya bisa diuji dengan clipboard tiruan di lingkungan offscreen
   (`supportsSelection()` = False); verifikasi nyata di Linux X11/Wayland lewat MT-9.2/9.3.
+
+## Fase 9 — Uji Lintas Platform & Rilis Sumber — 2026-10-01
+
+**Status:** MENUNGGU VERIFIKASI MANUAL (Windows/macOS/Linux desktop oleh user)
+**OS pengembangan:** Ubuntu 24.04.4 LTS (container, offscreen), Python 3.12.3
+
+### Yang dikerjakan
+- 9.1 Instalasi bersih di Linux: venv baru → `pip install .` (bukan editable) sukses;
+  `pyssh --version` dan `python -m pyssh --version` mencetak `PySSH 0.1.0`; `ansi_demo.txt` dan
+  `icon.png` ikut terpasang dan terbaca dari paket terpasang. Langkah instalasi Windows/macOS ada di
+  `README.md`.
+- 9.2 Quality Gate Linux lulus (di bawah). Unit test Windows/macOS → MT-9.0 (user).
+- 9.3 Persiapan lintas platform: test `test_settings_dialog` tidak lagi bergantung pada font
+  "DejaVu Sans Mono" (memakai font monospace yang tersedia di mesin). Belum ada laporan masalah
+  platform dari user.
+- 9.4 (COULD) Workflow GitHub Actions (unit test di Ubuntu/Windows/macOS) dibuat sebagai
+  `docs/ci/github-actions-test.yml` — **tidak aktif**, karena workflow hanya boleh diaktifkan
+  dengan izin (§10.5). Untuk mengaktifkan: pindahkan ke `.github/workflows/test.yml`.
+- 9.5 `CHANGELOG.md` dilengkapi untuk 0.1.0; versi `0.1.0` di `pyproject.toml` dan
+  `pyssh.__version__`. **Tag `v0.1.0` belum dibuat** (menunggu izin eksplisit).
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus (73 file) |
+| pytest (unit) | 661 lulus, 0 gagal |
+| pytest (integration) | password default `secret`: 19 lulus, 1 dilewati (audit); password unik `secret-Z9q7-unique`: **20 lulus** |
+| Coverage total | 98 % |
+
+### Kriteria penerimaan
+- [x] AC-9.1 Unit test lulus 100 % di Linux (agent). Hasil Windows/macOS dari MT-9.0: *menunggu
+  user*.
+- [x] AC-9.2 Instalasi bersih (`pip install .`) sukses di Linux; `pyssh --version` mencetak versi.
+
+### Checklist manual (diisi user; catat OS, versi OS, versi Python, sesi grafis)
+- [ ] MT-9.0 **Windows** (dan macOS bila ada): di venv bersih jalankan `pip install -e ".[dev]"` lalu
+  `pytest -q -m "not integration"` → semua lulus; lalu `pip install .` dan
+  `python -m pyssh --version` (lihat catatan gui-script di bawah). — OS: — hasil:
+- [ ] MT-9.1 **Windows 10/11**: ulangi MT-3.4, MT-4.1, MT-5.2, MT-6.2, MT-7.2. — OS: — hasil:
+- [ ] MT-9.2 **Linux X11**: ulangi daftar MT-9.1; cek juga primary selection (seleksi lalu klik
+  tengah). — OS: — hasil:
+- [ ] MT-9.3 **Linux Wayland**: aplikasi tampil, keyboard dan clipboard berfungsi (MT-3.4, MT-3.7,
+  MT-4.1). — OS: — hasil:
+- [ ] MT-9.4 **macOS** (bila perangkat tersedia): MT-3.4 (Ctrl ke terminal, Cmd untuk aksi
+  aplikasi), MT-3.7 (Cmd+C/Cmd+V), MT-4.1, MT-5.2; menu "Pengaturan…"/"Keluar"/"Tentang" berada di
+  menu aplikasi. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- **Windows dan gui-script**: `[project.gui-scripts]` (§3.1) membuat perintah `pyssh` di Windows
+  berjalan tanpa konsol, sehingga keluaran `pyssh --version` kemungkinan tidak tampil. README
+  menyarankan `python -m pyssh --version`. Belum diverifikasi di Windows (agent bekerja di Linux).
+- Workflow CI disimpan di luar `.github/workflows/` agar tidak berjalan tanpa izin.
+
+### Masalah yang diketahui
+- Semua hal khusus Windows/macOS (font, keyboard AltGr/Option/Cmd, menu aplikasi macOS, izin file,
+  Wayland) hanya diuji lewat parameter injeksi di Linux; perilaku nyata menunggu MT-9.x.
