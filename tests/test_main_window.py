@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import Qt
 
@@ -244,8 +246,13 @@ def test_banner_close_and_info_message(
 
 
 def test_welcome_page_and_tabs(window: MainWindow, fake_workers, password_answer) -> None:
+    from PySide6.QtGui import QKeySequence
+
+    from pyssh.ui.main_window import key_sequences
+
     assert window.content.currentWidget() is window.welcome
-    assert "Ctrl+Shift+N" in window.welcome.text()
+    native = key_sequences("new_session")[0].toString(QKeySequence.SequenceFormat.NativeText)
+    assert native in window.welcome.text()  # "Ctrl+Shift+N", or "⌘N" on macOS
     window.open_adhoc("u", "h")
     assert window.content.currentWidget() is window.tabs
     window.close_tab(0)
@@ -477,7 +484,8 @@ def test_help_menu(window: MainWindow, services, monkeypatch) -> None:
     )
     window.action_open_data.trigger()
     window.action_open_log.trigger()
-    assert opened == [str(services.paths.root), str(services.paths.log_file)]
+    # QUrl.toLocalFile() uses "/" even on Windows, so compare as paths.
+    assert [Path(p) for p in opened] == [services.paths.root, services.paths.log_file]
     shown: list[str] = []
     monkeypatch.setattr(QMessageBox, "about", lambda parent, title, text: shown.append(text))
     window.action_about.trigger()

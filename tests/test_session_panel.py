@@ -105,14 +105,13 @@ def test_delete_removes_secret(panel: SessionPanel, services, monkeypatch, qtbot
     assert panel.stack.currentWidget() is panel.empty_label
 
 
-def test_backspace_deletes_only_on_mac(qtbot, services, monkeypatch) -> None:
-    monkeypatch.setattr(panel_module, "confirm", lambda *a: True)
-    session = _add(services, "Web")
-    default = SessionPanel(services)
-    qtbot.addWidget(default)
-    default.select(session.id)
-    qtbot.keyClick(default.list, Qt.Key.Key_Backspace)
-    assert services.session_store.get(session.id) is not None
+def test_backspace_deletes_only_on_mac(qtbot) -> None:
+    default_list = panel_module._SessionList(mac=False)
+    qtbot.addWidget(default_list)
+    ignored: list[bool] = []
+    default_list.remove.connect(lambda: ignored.append(True))
+    qtbot.keyClick(default_list, Qt.Key.Key_Backspace)
+    assert ignored == []
     mac_list = panel_module._SessionList(mac=True)
     qtbot.addWidget(mac_list)
     removed: list[bool] = []

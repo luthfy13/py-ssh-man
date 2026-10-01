@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QGuiApplication, QInputMethodEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
-from pyssh import strings
+from pyssh import shortcuts, strings
 from pyssh.models import AppSettings
 from pyssh.terminal import widget as widget_module
 from pyssh.terminal.view import TerminalView
@@ -125,9 +125,8 @@ def test_shortcut_override(term: TerminalWidget) -> None:
     ctrl_c.ignore()
     QApplication.sendEvent(term, ctrl_c)
     assert ctrl_c.isAccepted()  # terminal keeps Ctrl+C
-    new_session = QKeyEvent(
-        QEvent.Type.ShortcutOverride, K.Key_N, M.ControlModifier | M.ShiftModifier, ""
-    )
+    row = shortcuts.shortcut_rows("new_session")[0]  # Ctrl+Shift+N, or Cmd+N on macOS
+    new_session = QKeyEvent(QEvent.Type.ShortcutOverride, min(row.keys), row.mods, "")
     new_session.accept()
     QApplication.sendEvent(term, new_session)
     assert not new_session.isAccepted()  # application shortcut
@@ -162,7 +161,8 @@ def test_paste_ignored_when_input_disabled_or_empty(term: TerminalWidget) -> Non
 def test_paste_shortcut(term: TerminalWidget, qtbot) -> None:
     sent = _record(term.input_bytes)
     QGuiApplication.clipboard().setText("clip")
-    qtbot.keyClick(term, K.Key_V, M.ControlModifier | M.ShiftModifier)
+    row = shortcuts.shortcut_rows("paste")[0]  # Ctrl+Shift+V, or Cmd+V on macOS
+    qtbot.keyClick(term, Qt.Key(min(row.keys)), row.mods)
     assert sent == [b"clip"]
 
 
@@ -190,11 +190,12 @@ def _wheel(widget: TerminalWidget, delta_y: int, mods, pixel_y: int = 0) -> None
 
 
 def test_ctrl_wheel_zooms(term: TerminalWidget) -> None:
+    zoom = shortcuts.zoom_wheel_modifier()  # Ctrl, or Cmd on macOS
     sizes = _record(term.font_size_changed)
-    _wheel(term, 120, M.ControlModifier)
+    _wheel(term, 120, zoom)
     assert term.font_size == 12
-    _wheel(term, -120, M.ControlModifier)
-    _wheel(term, -120, M.ControlModifier)
+    _wheel(term, -120, zoom)
+    _wheel(term, -120, zoom)
     assert term.font_size == 10
     assert sizes == [12, 11, 10]
 

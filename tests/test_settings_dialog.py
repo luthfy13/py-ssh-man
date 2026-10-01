@@ -40,7 +40,9 @@ def test_option_as_meta_only_on_mac(dialog_factory) -> None:
 
 def _available_monospace(dialog: SettingsDialog) -> str:
     """A monospace family installed on this machine (the combo lists only those)."""
-    assert dialog.font_combo.count() > 0
+    if dialog.font_combo.count() == 0:
+        # Seen on Windows with QT_QPA_PLATFORM=offscreen: Qt's font database is empty there.
+        pytest.skip("Qt font database has no monospace fonts on this platform plugin")
     return dialog.font_combo.itemText(0)
 
 
