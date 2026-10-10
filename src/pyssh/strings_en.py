@@ -225,7 +225,7 @@ WELCOME = "Double-click a session to open it, or press {shortcut} to create a ne
 CLOSE_TAB_TITLE = "Close Tab"
 CLOSE_TAB_CONFIRM = "The session is still connected. Close the tab?"
 QUIT_TITLE = "Quit"
-QUIT_CONFIRM = "There are {n} active sessions. Quit {app}?"
+QUIT_CONFIRM = "Active sessions: {n}. Quit {app}?"
 
 # --- Private keys (SPEC §7.8) ---
 KEY_NOT_FOUND = "Private key file not found: {path}"

@@ -814,7 +814,27 @@ dinaikkan ke 0.2.0.
   berganti bahasa): peta teks status tab (`terminal_tab.STATE_TEXT`), peta status vault di
   `main_window`, dan nilai default `field_label`/`remember_label` `PasswordDialog`. Ketiganya kini
   dibaca saat dipakai.
+- Tab demo: `tools/make_ansi_demo.py` kini membuat `ansi_demo.txt` (Indonesia, isinya tidak berubah
+  byte-per-byte) dan `ansi_demo_en.txt`; `load_demo_text()` memilih file sesuai bahasa aktif. Versi
+  English tetap memuat satu baris contoh teks Indonesia (diminta SPEC §8.6). Wheel `0.2.0` berisi
+  `i18n.py`, `strings_en.py`, dan kedua file demo (diperiksa dengan `pip wheel .`).
 - Versi `0.2.0` (`pyproject.toml`, `pyssh.__version__`); `CHANGELOG.md` dan `README.md` diperbarui.
+
+### Review independen
+Lima reviewer (akurasi terjemahan, gaya UI Inggris, kebenaran kode, ketahanan test lintas OS,
+kelengkapan + dokumentasi), tiap temuan diverifikasi ulang secara adversarial: 10 temuan,
+6 terkonfirmasi (4 masalah unik), semuanya diperbaiki:
+- `QUIT_CONFIRM` Inggris salah tata bahasa untuk 1 sesi ("There are 1 active sessions") → "Active
+  sessions: {n}. Quit {app}?".
+- Pemindaian layar terminal di `test_i18n_ui.py` kosong karena output belum diproses → kini
+  `flush_pending()` + cek isi baris yang diharapkan.
+- Isi tab demo masih Indonesia di mode English → file demo English (di atas).
+- README/CHANGELOG: di macOS item Pengaturan berada di menu aplikasi.
+Ditolak verifikator: istilah "password" pada pesan yang juga berlaku untuk passphrase (sama
+dengan teks Indonesia aslinya), huruf kapital judul "Unsupported database" (mengikuti teks asli),
+dan status tag `v0.2.0` (tag hanya dibuat atas izin user). Satu temuan yang ditolak tetap
+diperbaiki karena murah: `--version` crash bila direktori home tidak bisa ditentukan (urutan
+`get_paths()` lama dikembalikan; pembacaan bahasa lewat `saved_language()` yang aman).
 
 ### Test baru
 - `test_i18n.py`: kedua bahasa punya nama teks yang sama; placeholder `{…}` sama; tanda `&`
@@ -822,8 +842,10 @@ dinaikkan ke 0.2.0.
   sama di kedua bahasa dikunci (mis. "Password:", "Host:"); tidak ada kata Indonesia umum di teks
   Inggris (pemeriksaan ini terbukti menandai teks Indonesia).
 - `test_i18n_ui.py`: jendela utama (menu, panel, tab demo, tab gagal + banner, tab menghubungkan,
-  status bar, menu klik kanan) dan semua dialog dibuat dalam mode English; tidak ada teks Indonesia
-  yang tampil. Uji mutasi: mengembalikan salah satu bug di atas membuat test ini gagal.
+  status bar, menu klik kanan) dan semua dialog dibuat dalam mode English; output terminal diproses
+  dulu (`flush_pending`) lalu seluruh baris diperiksa; tidak ada teks Indonesia yang tampil kecuali
+  satu baris contoh di tab demo. Uji mutasi: mengembalikan salah satu bug di atas, atau memakai
+  file demo Indonesia di mode English, membuat test ini gagal.
 - `test_architecture.py`: larangan membaca `strings.NAMA` saat impor (level modul/kelas, nilai
   default, dekorator), larangan `from pyssh.strings import …`, hanya `i18n.py` yang mengimpor
   `strings_en`, dan pengecualian aturan A8 untuk `strings_en.py`.
@@ -836,7 +858,7 @@ dinaikkan ke 0.2.0.
 |---|---|
 | ruff check | 0 error |
 | ruff format --check | lulus (74 file) |
-| pytest (unit) | 717 lulus, 0 gagal |
+| pytest (unit) | 721 lulus, 0 gagal |
 | pytest (integration) | password `secret`: 19 lulus, 1 dilewati (audit); password unik: **20 lulus** |
 | Coverage `i18n.py`, `strings_en.py`, `settings_dialog.py` | 100 % |
 

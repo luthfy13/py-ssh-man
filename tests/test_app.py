@@ -220,3 +220,15 @@ def test_unlock_dialog_at_startup_in_english(
     _close_windows_soon()
     assert app_module.main([]) == 0
     assert seen == ["Skip"]
+
+
+def test_version_without_home_directory(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def no_home(**_kwargs):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(app_module.config, "get_paths", no_home)
+    assert app_module.saved_language() == "id"
+    assert app_module.main(["--version"]) == 0
+    assert capsys.readouterr().out == "PySSH 0.2.0\n"

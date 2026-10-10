@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from pyssh import i18n
 from pyssh.models import AuthType, SessionConfig
+from pyssh.terminal.widget import TerminalWidget
 from pyssh.ui import main_window as main_window_module
 from pyssh.ui.dialogs import HostKeyDialog, PasswordDialog
 from pyssh.ui.main_window import MainWindow
@@ -30,6 +31,8 @@ from test_i18n import EN, ID, INDONESIAN_WORDS
 
 INDONESIAN_ONLY = {value for name, value in ID.items() if EN[name] != value}
 ALLOWED = {i18n.language_name("id")}  # the language list names each language in itself
+# The English demo keeps one Indonesian line on purpose (SPEC §8.6 sample text).
+DEMO_SAMPLE_PREFIX = "Indonesian sample: "
 
 
 def _widget_texts(root: QWidget) -> list[str]:
@@ -51,6 +54,14 @@ def _widget_texts(root: QWidget) -> list[str]:
             for i in range(widget.count()):
                 texts += [widget.tabText(i), widget.tabToolTip(i)]
     return [text for text in texts if text and text not in ALLOWED]
+
+
+def _terminal_lines(terminal: TerminalWidget) -> list[str]:
+    """All scrollback and screen lines, after the queued output has been processed."""
+    terminal.flush_pending()
+    emulator = terminal.emulator
+    lines = [emulator.line_text(i).rstrip() for i in range(emulator.total_lines)]
+    return [line for line in lines if line]
 
 
 def _assert_english(texts: list[str]) -> None:
@@ -87,21 +98,28 @@ def test_main_window_in_english(
     texts = _widget_texts(window)
     texts += [a.text() for a in window.session_panel.context_menu().actions()]
 
-    window.open_demo_tab()
-    demo = window.tabs.currentWidget()
-    terminal = demo.terminal
+    terminal = window.open_demo_tab().terminal
     texts += [a.text() for a in terminal.context_menu().actions()]
-    texts += terminal.emulator.screen_lines_text()
+    demo_lines = _terminal_lines(terminal)
+    samples = [line for line in demo_lines if line.startswith(DEMO_SAMPLE_PREFIX)]
+    texts += [line for line in demo_lines if line not in samples]
 
     failed = window.open_session(session)
     fake_workers.last.failed.emit("E_CONNECT", EN["E_CONNECT"].format(host="h", port=22))
     connecting = window.open_adhoc("u", "h2")
+    failed_lines = _terminal_lines(failed.terminal)
+    connecting_lines = _terminal_lines(connecting.terminal)
     texts += [*_widget_texts(window), window.statusBar().currentMessage()]
-    texts += failed.terminal.emulator.screen_lines_text()
-    texts += connecting.terminal.emulator.screen_lines_text()
-    texts += [failed.status_text(), connecting.status_text()]
+    texts += [*failed_lines, *connecting_lines, failed.status_text(), connecting.status_text()]
 
     _assert_english(texts)
+    # The terminal scans above really saw output (they would pass vacuously on empty screens).
+    assert demo_lines[0] == "Terminal demo"
+    assert demo_lines[-1].startswith("Key inspector: press any key")
+    assert samples == [DEMO_SAMPLE_PREFIX + "Selamat datang! Koneksi SSH siap dipakai, Bapak/Ibu."]
+    assert connecting_lines == ["Connecting to u@h2:22 …"]
+    assert failed_lines[0] == "Connecting to u@h:22 …"
+    assert failed_lines[1].startswith("Cannot connect to h:22.")
     assert {"&File", "&Session", "&View", "&Help", "Settings…"} <= set(texts)
     assert welcome.startswith("Double-click a session")
     assert "Failed — u@h:22" in texts

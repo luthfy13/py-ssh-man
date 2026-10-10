@@ -83,8 +83,9 @@ Variabel `PYSSH_HOME` mengganti lokasi tersebut. Isinya: `pyssh.db` (sesi + secr
 
 ### Bahasa
 
-Pilih di **Berkas → Pengaturan… → Bahasa** (Bahasa Indonesia atau English). Bahasa baru berlaku
-setelah aplikasi ditutup dan dibuka ulang. Pilihan disimpan sebagai `"language"` (`"id"`/`"en"`)
+Pilih di **Berkas → Pengaturan… → Bahasa** (Bahasa Indonesia atau English); di macOS, Qt
+memindahkan item pengaturan ke menu aplikasi (menu paling kiri). Bahasa baru berlaku setelah
+aplikasi ditutup dan dibuka ulang. Tab demo (`--demo`) juga mengikuti bahasa terpilih. Pilihan disimpan sebagai `"language"` (`"id"`/`"en"`)
 di `settings.json`; nilai lain dianggap `"id"`. Teks bawaan Qt (mis. menu klik kanan kolom isian:
 Undo/Cut/Copy/Paste) selalu berbahasa Inggris karena Qt tidak menyediakan terjemahan Indonesia.
 
@@ -156,7 +157,8 @@ setiap push dan pull request (tanpa test integrasi).
 
 ### Alat bantu
 
-- `python tools/make_ansi_demo.py` — membuat ulang `src/pyssh/resources/ansi_demo.txt`.
+- `python tools/make_ansi_demo.py` — membuat ulang `src/pyssh/resources/ansi_demo.txt` dan
+  `ansi_demo_en.txt`.
 - `python tools/make_icon.py` — membuat ulang `src/pyssh/resources/icon.png`.
 - `python tools/bench_emulator.py` — throughput emulator (MB/s).
 - `PYSSH_DEBUG_PERF=1 python -m pyssh` — log lag event loop dan throughput setiap 5 detik.

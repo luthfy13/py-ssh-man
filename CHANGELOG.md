@@ -6,14 +6,16 @@ Semua perubahan penting pada PySSH dicatat di file ini.
 
 ### Ditambahkan
 - **Pilihan bahasa antarmuka**: Bahasa Indonesia (default) dan English, di **Berkas → Pengaturan… →
-  Bahasa**. Bahasa baru berlaku setelah aplikasi dibuka ulang; pemberitahuannya tampil dalam bahasa
-  yang dipilih. Bahasa yang tersimpan juga dipakai untuk pesan `--connect` yang salah format.
+  Bahasa** (macOS: menu aplikasi). Bahasa baru berlaku setelah aplikasi dibuka ulang;
+  pemberitahuannya tampil dalam bahasa yang dipilih. Bahasa yang tersimpan juga dipakai untuk pesan
+  `--connect` yang salah format dan isi tab demo (`ansi_demo_en.txt`, tetap dengan satu baris contoh
+  teks Indonesia).
 - Pengaturan `language` di `settings.json` (`"id"` atau `"en"`; nilai lain → `"id"`).
 
 ### Diubah
 - Semua teks UI kini dibaca saat dipakai, tidak lagi disalin saat modul diimpor (teks status tab,
   status vault, label bawaan dialog password); dijaga oleh test arsitektur.
-- 717 unit test (sebelumnya 661), termasuk pemeriksaan bahwa kedua bahasa punya teks, placeholder,
+- 721 unit test (sebelumnya 661), termasuk pemeriksaan bahwa kedua bahasa punya teks, placeholder,
   dan tanda `&` yang sama, serta pemindaian seluruh jendela/dialog dalam mode English.
 
 ## [0.1.0] — 2026-10-01

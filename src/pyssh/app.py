@@ -61,6 +61,14 @@ def parse_target(text: str) -> tuple[str, str, int]:
     return user, host, port
 
 
+def saved_language() -> str:
+    """UI language from ``settings.json``; read-only, so ``--version`` still creates nothing."""
+    try:
+        return read_language(config.get_paths().settings_file)
+    except RuntimeError:  # Path.home() fails when no home directory can be determined
+        return i18n.DEFAULT_LANGUAGE
+
+
 def install_excepthooks(log_file: str) -> None:
     """Log unhandled exceptions; on the GUI thread also show a short message box."""
 
@@ -94,9 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    paths = config.get_paths()
     # Before any user-visible text is used; a language change in Settings applies after restart.
-    language = i18n.set_language(read_language(paths.settings_file))
+    language = i18n.set_language(saved_language())
     target = None
     if args.connect:
         try:
@@ -107,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         print(strings.VERSION_LINE.format(app=config.APP_NAME, version=__version__))
         return 0
 
+    paths = config.get_paths()
     config.ensure_dirs(paths)
     setup_logging(paths, debug=args.debug)
     install_excepthooks(str(paths.log_file))

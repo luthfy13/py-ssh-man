@@ -5,6 +5,9 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+from pyssh import i18n
 from pyssh.models import AppSettings
 from pyssh.terminal.demo_backend import DemoBackend, load_demo_text, render_input
 from pyssh.terminal.widget import TerminalWidget
@@ -30,17 +33,35 @@ def test_render_input() -> None:
     assert render_input(b"\xff") == b"\x1b[36m\\xff\x1b[0m"
 
 
-def test_demo_resource_matches_generator() -> None:
+@pytest.mark.parametrize(
+    ("language", "name"), [("id", "ansi_demo.txt"), ("en", "ansi_demo_en.txt")]
+)
+def test_demo_resource_matches_generator(language: str, name: str) -> None:
     tool = _load_tool()
-    resource = ROOT / "src" / "pyssh" / "resources" / "ansi_demo.txt"
-    assert resource.read_text(encoding="utf-8") == tool.build_demo()
+    resource = ROOT / "src" / "pyssh" / "resources" / name
+    assert resource.read_text(encoding="utf-8") == tool.build_demo(language)
+    assert tool.OUTPUTS[language] == resource
+    assert set(tool.OUTPUTS) == set(i18n.LANGUAGES)
 
 
-def test_demo_content() -> None:
-    text = load_demo_text().decode("utf-8")
+@pytest.mark.parametrize(
+    ("language", "needles"),
+    [
+        ("id", ("Gradasi truecolor", "Bahasa Indonesia: Selamat datang!")),
+        ("en", ("Truecolor gradient", "Indonesian sample: Selamat datang!")),
+    ],
+)
+def test_demo_content(language: str, needles: tuple[str, ...]) -> None:
+    text = load_demo_text(language).decode("utf-8")
     assert "\r\n" in text and "\n" not in text.replace("\r\n", "")
-    for needle in ("\x1b[48;5;", "\x1b[48;2;", "\x1b[9m", "┌", "漢字", "Bahasa Indonesia"):
+    for needle in ("\x1b[48;5;", "\x1b[48;2;", "\x1b[9m", "┌", "漢字", *needles):
         assert needle in text
+
+
+def test_demo_follows_active_language() -> None:
+    assert load_demo_text() == load_demo_text("id")
+    i18n.set_language("en")
+    assert load_demo_text() == load_demo_text("en") != load_demo_text("id")
 
 
 def test_backend_shows_demo_and_echoes_keys(qtbot) -> None:
