@@ -44,14 +44,17 @@ class PasswordDialog(QDialog):
         *,
         title: str,
         prompt: str,
-        field_label: str = strings.PASSWORD_FIELD,
-        remember_label: str = strings.PASSWORD_REMEMBER,
+        field_label: str | None = None,
+        remember_label: str | None = None,
         error: str | None = None,
         show_remember: bool = True,
         remember_default: bool = False,
         parent: QWidget | None = None,
     ) -> None:
-        """Build the dialog; ``error`` is shown in red above the field."""
+        """Build the dialog; ``error`` is shown in red above the field.
+
+        ``field_label``/``remember_label`` default to the password texts.
+        """
         super().__init__(parent)
         self.setWindowTitle(title)
         self.prompt_label = QLabel(prompt)
@@ -62,13 +65,13 @@ class PasswordDialog(QDialog):
         self.error_label.setVisible(bool(error))
         self.secret_edit = QLineEdit()
         self.secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.remember_check = QCheckBox(remember_label)
+        self.remember_check = QCheckBox(remember_label or strings.PASSWORD_REMEMBER)
         self.remember_check.setChecked(remember_default)
         self.remember_check.setVisible(show_remember)
         self._show_remember = show_remember
 
         form = QFormLayout()
-        form.addRow(field_label, self.secret_edit)
+        form.addRow(field_label or strings.PASSWORD_FIELD, self.secret_edit)
         buttons = QDialogButtonBox()
         ok = buttons.addButton(strings.BUTTON_OK, QDialogButtonBox.ButtonRole.AcceptRole)
         ok.setDefault(True)

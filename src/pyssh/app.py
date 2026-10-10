@@ -12,11 +12,11 @@ from types import TracebackType
 from PySide6.QtCore import QCoreApplication, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from pyssh import __version__, config, strings
+from pyssh import __version__, config, i18n, strings
 from pyssh.core.database import SCHEMA_VERSION, Database, DatabaseVersionError
 from pyssh.core.secret_store import SecretStore
 from pyssh.core.session_store import SessionStore
-from pyssh.core.settings_store import SettingsStore
+from pyssh.core.settings_store import SettingsStore, read_language
 from pyssh.core.ssh_worker import SSHWorker
 from pyssh.core.vault import Vault, VaultState
 from pyssh.logging_setup import setup_logging
@@ -94,6 +94,9 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths = config.get_paths()
+    # Before any user-visible text is used; a language change in Settings applies after restart.
+    language = i18n.set_language(read_language(paths.settings_file))
     target = None
     if args.connect:
         try:
@@ -104,11 +107,10 @@ def main(argv: list[str] | None = None) -> int:
         print(strings.VERSION_LINE.format(app=config.APP_NAME, version=__version__))
         return 0
 
-    paths = config.get_paths()
     config.ensure_dirs(paths)
     setup_logging(paths, debug=args.debug)
     install_excepthooks(str(paths.log_file))
-    log.info("starting %s %s", config.APP_NAME, __version__)
+    log.info("starting %s %s (language %s)", config.APP_NAME, __version__, language)
 
     if config.IS_MAC:
         # Must precede QApplication: Ctrl = physical Control, Meta = Command (SPEC §8.3.1).

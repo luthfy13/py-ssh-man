@@ -26,6 +26,16 @@ def pyssh_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+@pytest.fixture(autouse=True)
+def default_language():
+    """Every test starts and ends with the default UI language (Bahasa Indonesia)."""
+    from pyssh import i18n
+
+    i18n.set_language(i18n.DEFAULT_LANGUAGE)
+    yield
+    i18n.set_language(i18n.DEFAULT_LANGUAGE)
+
+
 @pytest.fixture
 def fast_kdf():
     """Cheap scrypt parameters for tests; the default KDF is deliberately slow (SPEC §10.1)."""

@@ -12,6 +12,7 @@ khusus untuk sesi SSH interaktif. Ditulis dengan Python, PySide6 (Qt 6), paramik
 - Verifikasi host key (Trust On First Use) dengan file `known_hosts` milik aplikasi.
 - Terminal `xterm-256color`: 16/256/truecolor, atribut teks, scrollback, seleksi, copy/paste
   (termasuk bracketed paste), zoom font, alternate screen untuk vim/htop/less.
+- Bahasa antarmuka: Bahasa Indonesia (default) atau English.
 
 Spesifikasi lengkap: [`docs/SPEC.md`](docs/SPEC.md). Laporan per fase:
 [`docs/PROGRESS.md`](docs/PROGRESS.md).
@@ -79,6 +80,13 @@ Variabel `PYSSH_HOME` mengganti lokasi tersebut. Isinya: `pyssh.db` (sesi + secr
   dihapus, daftar sesi tetap ada.
 - Saat aplikasi dibuka, vault bisa dibuka atau **dilewati**; bila dilewati, password diminta saat
   koneksi.
+
+### Bahasa
+
+Pilih di **Berkas → Pengaturan… → Bahasa** (Bahasa Indonesia atau English). Bahasa baru berlaku
+setelah aplikasi ditutup dan dibuka ulang. Pilihan disimpan sebagai `"language"` (`"id"`/`"en"`)
+di `settings.json`; nilai lain dianggap `"id"`. Teks bawaan Qt (mis. menu klik kanan kolom isian:
+Undo/Cut/Copy/Paste) selalu berbahasa Inggris karena Qt tidak menyediakan terjemahan Indonesia.
 
 ### Shortcut utama
 

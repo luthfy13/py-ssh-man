@@ -7,18 +7,20 @@ from dataclasses import replace
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFontComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from pyssh import config, strings
+from pyssh import config, i18n, strings
 from pyssh.core.settings_store import CLAMP_RANGES, SettingsStore
 from pyssh.models import AppSettings
 
@@ -43,6 +45,13 @@ class SettingsDialog(QDialog):
         self.saved_settings: AppSettings | None = None
         current = store.current
         self.setWindowTitle(strings.SETTINGS_TITLE)
+
+        self.language_combo = QComboBox()
+        for code in i18n.LANGUAGES:
+            self.language_combo.addItem(i18n.language_name(code), code)
+        self.language_combo.setCurrentIndex(
+            self.language_combo.findData(i18n.normalize_language(current.language))
+        )
 
         self.font_auto_check = QCheckBox(strings.SETTINGS_FONT_AUTO)
         self.font_combo = QFontComboBox()
@@ -71,6 +80,7 @@ class SettingsDialog(QDialog):
         font_row.addWidget(self.font_combo, 1)
         font_row.addWidget(self.font_auto_check)
         form = QFormLayout()
+        form.addRow(strings.SETTINGS_LANGUAGE, self.language_combo)
         form.addRow(strings.SETTINGS_FONT, font_row)
         form.addRow(strings.SETTINGS_FONT_SIZE, self.font_size_spin)
         form.addRow(strings.SETTINGS_SCROLLBACK, self.scrollback_spin)
@@ -110,10 +120,19 @@ class SettingsDialog(QDialog):
             keepalive_seconds=self.keepalive_spin.value(),
             connect_timeout_seconds=self.timeout_spin.value(),
             mac_option_as_meta=self.option_meta_check.isChecked(),
+            language=self.language_combo.currentData(),
         )
 
     def _save(self) -> None:
+        previous = self._store.current.language
         settings = self.values()
         self._store.save(settings)
         self.saved_settings = settings
+        if settings.language not in (previous, i18n.current_language()):
+            # In the chosen language: the user picked it because they read it best.
+            QMessageBox.information(
+                self,
+                i18n.lookup(settings.language, "LANGUAGE_RESTART_TITLE"),
+                i18n.lookup(settings.language, "LANGUAGE_RESTART").format(app=config.APP_NAME),
+            )
         self.accept()

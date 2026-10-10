@@ -6,7 +6,9 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QMessageBox
 
+from pyssh import i18n, strings
 from pyssh.ui.settings_dialog import SettingsDialog
 
 
@@ -81,3 +83,68 @@ def test_existing_font_preselected(dialog_factory, services) -> None:
     dialog = dialog_factory(mac=False)
     assert not dialog.font_auto_check.isChecked()
     assert dialog.font_combo.currentFont().family() == family
+
+
+@pytest.fixture
+def infos(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """Record information boxes instead of showing them (modal boxes would block)."""
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(QMessageBox, "information", lambda _parent, t, x: shown.append((t, x)))
+    return shown
+
+
+def _languages(dialog: SettingsDialog) -> list[tuple[str, str]]:
+    combo = dialog.language_combo
+    return [(combo.itemText(i), combo.itemData(i)) for i in range(combo.count())]
+
+
+def test_language_choices_and_default(dialog_factory) -> None:
+    dialog = dialog_factory(mac=False)
+    assert _languages(dialog) == [("Bahasa Indonesia", "id"), ("English", "en")]
+    assert dialog.language_combo.currentData() == "id"
+    assert dialog.values().language == "id"
+
+
+def test_saved_language_preselected(dialog_factory, services) -> None:
+    services.settings_store.save(replace(services.settings_store.current, language="en"))
+    assert dialog_factory(mac=False).language_combo.currentData() == "en"
+
+
+def test_changing_language_saves_and_says_restart_in_new_language(
+    dialog_factory, services, infos
+) -> None:
+    dialog = dialog_factory(mac=False)
+    dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("en"))
+    dialog.save_button.click()
+    assert services.settings_store.load().language == "en"
+    assert infos == [("Language", "The new language will be used after PySSH is restarted.")]
+    assert i18n.current_language() == "id"  # applies after restart only
+    assert strings.MENU_FILE == "&Berkas"
+
+
+def test_no_restart_message_without_language_change(dialog_factory, infos) -> None:
+    dialog = dialog_factory(mac=False)
+    dialog.font_size_spin.setValue(15)
+    dialog.save_button.click()
+    assert infos == []
+
+
+def test_switching_back_to_running_language_needs_no_restart(
+    dialog_factory, services, infos
+) -> None:
+    services.settings_store.save(replace(services.settings_store.current, language="en"))
+    dialog = dialog_factory(mac=False)  # running in Indonesian, English chosen earlier
+    dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("id"))
+    dialog.save_button.click()
+    assert services.settings_store.load().language == "id"
+    assert infos == []
+
+
+def test_restart_message_in_indonesian(dialog_factory, services, infos) -> None:
+    i18n.set_language("en")
+    services.settings_store.save(replace(services.settings_store.current, language="en"))
+    dialog = dialog_factory(mac=False)
+    assert dialog.windowTitle() == "Settings"
+    dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("id"))
+    dialog.save_button.click()
+    assert infos == [("Bahasa", "Bahasa baru akan dipakai setelah PySSH dibuka ulang.")]

@@ -1,6 +1,8 @@
-"""All user-visible text (Bahasa Indonesia), see SPEC §9.11.
+"""All user-visible text, see SPEC §9.11.
 
-Placeholders use named ``str.format`` fields.
+The values here are Bahasa Indonesia (the default language). ``i18n.set_language`` replaces them
+at startup with the same names from ``strings_en.py``; read them as ``strings.NAME`` when the text
+is needed, never at import time. Placeholders use named ``str.format`` fields.
 """
 
 from __future__ import annotations
@@ -254,8 +256,15 @@ SETTINGS_TIMEOUT = "Timeout koneksi (detik):"
 SETTINGS_OPTION_META = "Option sebagai Meta"
 SETTINGS_NOTE = (
     "Font dan ukuran berlaku langsung. Baris scrollback, keepalive, dan timeout berlaku untuk "
-    "tab/koneksi baru."
+    "tab/koneksi baru. Bahasa berlaku setelah aplikasi dibuka ulang."
 )
+
+# --- Language (setting; applies after restart) ---
+SETTINGS_LANGUAGE = "Bahasa:"
+LANGUAGE_NAME_ID = "Bahasa Indonesia"
+LANGUAGE_NAME_EN = "English"
+LANGUAGE_RESTART_TITLE = "Bahasa"
+LANGUAGE_RESTART = "Bahasa baru akan dipakai setelah {app} dibuka ulang."
 
 # --- Help menu (SPEC §9.1) ---
 ACTION_OPEN_DATA_FOLDER = "Buka Folder Data"

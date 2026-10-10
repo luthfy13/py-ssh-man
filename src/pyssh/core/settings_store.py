@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from pyssh import config
+from pyssh.i18n import DEFAULT_LANGUAGE, LANGUAGES
 from pyssh.models import AppSettings, default_settings
 
 log = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ CLAMP_RANGES: dict[str, tuple[int, int]] = {
 }
 _BOOL_FIELDS = {"copy_on_select", "bold_is_bright", "confirm_on_close", "mac_option_as_meta"}
 _STR_FIELDS = {"font_family"}
+_LANGUAGE_FIELD = "language"
 _OPTIONAL_STR_FIELDS = {"window_geometry", "window_state", "splitter_state"}
 
 
@@ -54,6 +56,11 @@ def _coerce(name: str, value: Any, default: Any) -> Any:
             log.warning("setting %s has wrong type, using default", name)
             return default
         return _clamp(name, value)
+    if name == _LANGUAGE_FIELD:
+        if value not in LANGUAGES:  # also rejects non-strings
+            log.warning("setting %s has unsupported value, using default", name)
+            return default
+        return value
     if name in _BOOL_FIELDS:
         ok = isinstance(value, bool)
     elif name in _STR_FIELDS:
@@ -66,6 +73,31 @@ def _coerce(name: str, value: Any, default: Any) -> Any:
         log.warning("setting %s has wrong type, using default", name)
         return default
     return value
+
+
+def _read_settings_dict(path: Path) -> dict[str, Any]:
+    """The ``settings`` object of ``settings.json``; raises ``OSError``/``ValueError``."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(data, dict)
+        or data.get("version") != FILE_VERSION
+        or not isinstance(data.get("settings"), dict)
+    ):
+        raise ValueError("unexpected settings.json structure")
+    return data["settings"]
+
+
+def read_language(path: Path) -> str:
+    """The UI language saved in ``settings.json``, read without side effects.
+
+    Used at startup before logging is set up and before the full ``load()``; gives the same
+    result as ``load().language`` (missing, unreadable or invalid → ``DEFAULT_LANGUAGE``).
+    """
+    try:
+        value = _read_settings_dict(path).get(_LANGUAGE_FIELD, DEFAULT_LANGUAGE)
+    except (OSError, ValueError):
+        return DEFAULT_LANGUAGE
+    return value if value in LANGUAGES else DEFAULT_LANGUAGE
 
 
 class SettingsStore:
@@ -89,20 +121,13 @@ class SettingsStore:
             self._current = defaults
             return self._current
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(data, dict)
-                or data.get("version") != FILE_VERSION
-                or not isinstance(data.get("settings"), dict)
-            ):
-                raise ValueError("unexpected settings.json structure")
+            raw = _read_settings_dict(self._path)
         except (OSError, ValueError) as exc:
             log.warning("settings.json unreadable (%s); using defaults", exc)
             self._move_aside()
             self._current = defaults
             return self._current
 
-        raw = data["settings"]
         values = {}
         for f in fields(AppSettings):
             default = getattr(defaults, f.name)

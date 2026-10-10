@@ -8,6 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pyssh import strings
+from pyssh.i18n import DEFAULT_LANGUAGE
 
 NAME_MAX_LEN = 64
 PORT_MIN = 1
@@ -90,6 +91,7 @@ class AppSettings:
     keepalive_seconds: int = 30
     connect_timeout_seconds: int = 10
     mac_option_as_meta: bool = False
+    language: str = DEFAULT_LANGUAGE  # i18n.LANGUAGES; applies after restart
     window_geometry: str | None = None
     window_state: str | None = None
     splitter_state: str | None = None

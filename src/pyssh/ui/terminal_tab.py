@@ -43,14 +43,16 @@ class TabState(Enum):
     CLOSED = "closed"
 
 
-STATE_TEXT = {
-    TabState.IDLE: strings.STATE_IDLE,
-    TabState.CONNECTING: strings.STATE_CONNECTING,
-    TabState.CONNECTED: strings.STATE_CONNECTED,
-    TabState.DISCONNECTED: strings.STATE_DISCONNECTED,
-    TabState.FAILED: strings.STATE_FAILED,
-    TabState.CLOSED: strings.STATE_DISCONNECTED,
-}
+def state_text(state: TabState) -> str:
+    """Status text of ``state``, read from ``strings`` when called (see ``i18n``)."""
+    return {
+        TabState.IDLE: strings.STATE_IDLE,
+        TabState.CONNECTING: strings.STATE_CONNECTING,
+        TabState.CONNECTED: strings.STATE_CONNECTED,
+        TabState.DISCONNECTED: strings.STATE_DISCONNECTED,
+        TabState.FAILED: strings.STATE_FAILED,
+        TabState.CLOSED: strings.STATE_DISCONNECTED,
+    }[state]
 
 
 class Banner(QFrame):
@@ -158,7 +160,7 @@ class TerminalTab(QWidget):
     def status_text(self) -> str:
         """Status bar text, e.g. "Terhubung — admin@10.0.0.5:22"."""
         return strings.STATUS_LINE.format(
-            state=STATE_TEXT[self._state], target=self._session.target()
+            state=state_text(self._state), target=self._session.target()
         )
 
     # ----- public actions ---------------------------------------------------------------

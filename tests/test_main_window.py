@@ -489,7 +489,7 @@ def test_help_menu(window: MainWindow, services, monkeypatch) -> None:
     shown: list[str] = []
     monkeypatch.setattr(QMessageBox, "about", lambda parent, title, text: shown.append(text))
     window.action_about.trigger()
-    assert "PySSH 0.1.0" in shown[0]
+    assert "PySSH 0.2.0" in shown[0]
     assert platform.python_version() in shown[0]
     assert qVersion() in shown[0]
     assert window.action_about.menuRole() == window.action_about.MenuRole.AboutRole

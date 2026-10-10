@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from pyssh import config
-from pyssh.core.settings_store import SettingsStore
+from pyssh.core.settings_store import SettingsStore, read_language
 from pyssh.models import AppSettings
 
 
@@ -83,6 +83,11 @@ def test_out_of_range_values_are_clamped(
         ("font_family", 5),
         ("window_geometry", 7),
         ("mac_option_as_meta", "yes"),
+        ("language", 1),
+        ("language", None),
+        ("language", ["en"]),
+        ("language", "fr"),
+        ("language", "EN"),
     ],
 )
 def test_wrong_type_uses_default(tmp_path: Path, name: str, value: object) -> None:
@@ -109,3 +114,47 @@ def test_unreadable_file_is_backed_up(tmp_path: Path, content: str) -> None:
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == content
     assert not path.exists()
+
+
+def test_language_defaults_to_indonesian_and_round_trips(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    assert AppSettings().language == "id"
+    store = SettingsStore(path, mac=False)
+    store.save(replace(AppSettings(), language="en"))
+    assert SettingsStore(path, mac=False).load().language == "en"
+    assert read_language(path) == "en"
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (None, "id"),  # no file
+        (json.dumps({"version": 1, "settings": {"language": "en"}}), "en"),
+        (json.dumps({"version": 1, "settings": {"language": "id"}}), "id"),
+        (json.dumps({"version": 1, "settings": {"language": "fr"}}), "id"),
+        (json.dumps({"version": 1, "settings": {"language": 3}}), "id"),
+        (json.dumps({"version": 1, "settings": {}}), "id"),
+        (json.dumps({"version": 2, "settings": {"language": "en"}}), "id"),
+        (json.dumps({"version": 1, "settings": []}), "id"),
+        ("{not json", "id"),
+        ("[1, 2]", "id"),
+    ],
+)
+def test_read_language_matches_load_without_side_effects(
+    tmp_path: Path, content: str | None, expected: str
+) -> None:
+    folder = tmp_path / "data"
+    folder.mkdir()
+    path = folder / "settings.json"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    assert read_language(path) == expected
+    assert [p.name for p in folder.iterdir()] == ([] if content is None else [path.name])
+    assert SettingsStore(path, mac=False).load().language == expected
+
+
+def test_read_language_on_undecodable_file(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"\xff\xfe\x00garbage")
+    assert read_language(path) == "id"
+    assert path.exists()

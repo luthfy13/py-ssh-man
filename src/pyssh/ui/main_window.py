@@ -62,11 +62,14 @@ STATE_ICON_COLOR = {
     TabState.CLOSED: icons.GRAY,
 }
 
-_VAULT_STATE_TEXT = {
-    VaultState.UNINITIALIZED: strings.VAULT_STATE_UNINITIALIZED,
-    VaultState.LOCKED: strings.VAULT_STATE_LOCKED,
-    VaultState.UNLOCKED: strings.VAULT_STATE_UNLOCKED,
-}
+
+def _vault_state_text(state: VaultState) -> str:
+    """Vault state for the status bar, read from ``strings`` when called (see ``i18n``)."""
+    return {
+        VaultState.UNINITIALIZED: strings.VAULT_STATE_UNINITIALIZED,
+        VaultState.LOCKED: strings.VAULT_STATE_LOCKED,
+        VaultState.UNLOCKED: strings.VAULT_STATE_UNLOCKED,
+    }[state]
 
 
 def app_icon() -> QIcon:
@@ -307,7 +310,7 @@ class MainWindow(QMainWindow):
         self.action_vault_lock.setVisible(state is VaultState.UNLOCKED)
         self.action_vault_change.setVisible(initialized)
         self.action_vault_reset.setVisible(initialized)
-        self.vault_label.setText(strings.VAULT_STATUS.format(state=_VAULT_STATE_TEXT[state]))
+        self.vault_label.setText(strings.VAULT_STATUS.format(state=_vault_state_text(state)))
 
     def _vault_create(self) -> None:
         CreateMasterPasswordDialog(self._services.vault, self).exec()

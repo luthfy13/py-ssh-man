@@ -731,7 +731,8 @@ di-resize saat htop berjalan, `stty size` = grid widget (45×24).
   `docs/ci/github-actions-test.yml` — **tidak aktif**, karena workflow hanya boleh diaktifkan
   dengan izin (§10.5). Untuk mengaktifkan: pindahkan ke `.github/workflows/test.yml`.
 - 9.5 `CHANGELOG.md` dilengkapi untuk 0.1.0; versi `0.1.0` di `pyproject.toml` dan
-  `pyssh.__version__`. **Tag `v0.1.0` belum dibuat** (menunggu izin eksplisit).
+  `pyssh.__version__`. **Tag `v0.1.0` belum dibuat** (menunggu izin eksplisit; kemudian dibuat
+  user lewat GitHub Release, lihat "Tambahan setelah izin user").
 
 ### Quality Gate
 | Cek | Hasil |
@@ -783,3 +784,82 @@ di-resize saat htop berjalan, `stty size` = grid widget (45×24).
   di desktop nyata tetap diperlukan).
 - Tag `v0.1.0` dibuat secara lokal, tetapi **push tag ditolak lingkungan sesi ini** (proxy git
   memutus `git push` untuk ref tag; push branch berhasil). Tag perlu dibuat oleh pemilik repo.
+- **Tag `v0.1.0` kini ada di GitHub**: dibuat user lewat GitHub Release (target `main`).
+  Diverifikasi dengan `git ls-remote --tags origin` → `refs/tags/v0.1.0` = `e32d2ad`.
+
+## Tambahan — Pilihan Bahasa (0.2.0) — 2026-10-10
+
+**Status:** SELESAI (agent); uji manual MT-L.x menunggu user
+**Permintaan user:** tambah pilihan bahasa, bahasa Inggris. Keputusan user: berlaku setelah restart,
+default selalu Bahasa Indonesia, hanya teks aplikasi (dokumen tetap berbahasa Indonesia), versi
+dinaikkan ke 0.2.0.
+
+### Yang dikerjakan
+- `strings_en.py`: semua teks UI dalam bahasa Inggris, dengan nama dan placeholder yang sama
+  dengan `strings.py` (Indonesia, tetap menjadi default dan sumber nama).
+- `i18n.py` (tanpa Qt): `set_language()` menyalin teks bahasa terpilih ke atribut `strings` sekali
+  saat startup; `lookup()` membaca teks bahasa lain tanpa mengganti bahasa aktif; kode yang tidak
+  dikenal → `"id"`.
+- `AppSettings.language` (`"id"`/`"en"`), divalidasi di `settings_store`; `read_language()` membaca
+  bahasa dari `settings.json` tanpa efek samping (tanpa log, tanpa memindahkan file rusak) karena
+  dipanggil sebelum logging aktif. Hasilnya selalu sama dengan `load().language` (logika validasi
+  dipakai bersama).
+- `app.main()`: bahasa diterapkan tepat setelah argumen dibaca, sebelum teks apa pun dipakai
+  (termasuk pesan `--connect` salah format dan peringatan database).
+- Pengaturan: kombo **Bahasa** di baris pertama (nama bahasa ditulis dalam bahasanya sendiri).
+  Setelah disimpan dengan bahasa baru, muncul pemberitahuan "berlaku setelah dibuka ulang" **dalam
+  bahasa yang dipilih**; tidak muncul bila bahasa tidak berubah atau dikembalikan ke bahasa yang
+  sedang aktif.
+- Bug yang ditemukan saat implementasi (teks yang disalin saat impor modul sehingga tidak ikut
+  berganti bahasa): peta teks status tab (`terminal_tab.STATE_TEXT`), peta status vault di
+  `main_window`, dan nilai default `field_label`/`remember_label` `PasswordDialog`. Ketiganya kini
+  dibaca saat dipakai.
+- Versi `0.2.0` (`pyproject.toml`, `pyssh.__version__`); `CHANGELOG.md` dan `README.md` diperbarui.
+
+### Test baru
+- `test_i18n.py`: kedua bahasa punya nama teks yang sama; placeholder `{…}` sama; tanda `&`
+  (mnemonic) dan `&&` sama; huruf mnemonic menu utama unik per bahasa; daftar teks yang memang
+  sama di kedua bahasa dikunci (mis. "Password:", "Host:"); tidak ada kata Indonesia umum di teks
+  Inggris (pemeriksaan ini terbukti menandai teks Indonesia).
+- `test_i18n_ui.py`: jendela utama (menu, panel, tab demo, tab gagal + banner, tab menghubungkan,
+  status bar, menu klik kanan) dan semua dialog dibuat dalam mode English; tidak ada teks Indonesia
+  yang tampil. Uji mutasi: mengembalikan salah satu bug di atas membuat test ini gagal.
+- `test_architecture.py`: larangan membaca `strings.NAMA` saat impor (level modul/kelas, nilai
+  default, dekorator), larangan `from pyssh.strings import …`, hanya `i18n.py` yang mengimpor
+  `strings_en`, dan pengecualian aturan A8 untuk `strings_en.py`.
+- `test_settings_store.py`, `test_settings_dialog.py`, `test_app.py`: validasi, `read_language`
+  tanpa efek samping, pemberitahuan restart, startup English (menu, dialog vault, pesan
+  `--connect`), bahasa tidak dikenal → Indonesia.
+
+### Quality Gate
+| Cek | Hasil |
+|---|---|
+| ruff check | 0 error |
+| ruff format --check | lulus (74 file) |
+| pytest (unit) | 717 lulus, 0 gagal |
+| pytest (integration) | password `secret`: 19 lulus, 1 dilewati (audit); password unik: **20 lulus** |
+| Coverage `i18n.py`, `strings_en.py`, `settings_dialog.py` | 100 % |
+
+### Checklist manual (diisi user)
+- [ ] MT-L.1 Pengaturan → Bahasa → English → Simpan: muncul pemberitahuan berbahasa Inggris;
+  tampilan belum berubah. Tutup dan buka ulang aplikasi: menu, panel, dialog, dan pesan koneksi
+  berbahasa Inggris. — OS: — hasil:
+- [ ] MT-L.2 Kembali ke Bahasa Indonesia → buka ulang: semua teks kembali berbahasa Indonesia.
+  — OS: — hasil:
+- [ ] MT-L.3 Mode English: periksa teks tidak terpotong di dialog Pengaturan, Sesi Baru, dan
+  Host Key. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- SPEC §1.4 menetapkan teks UI berbahasa Indonesia; kini Indonesia tetap default dan English
+  menjadi pilihan tambahan (atas permintaan user). `SPEC.md` tidak diubah.
+- Bahasa diterapkan dengan menimpa atribut `strings` saat startup (bukan Qt Linguist/`.ts`), agar
+  semua kode yang sudah memakai `strings.NAMA` tidak perlu diubah; tidak ada pergantian bahasa saat
+  aplikasi berjalan, sehingga thread worker selalu membaca teks yang tetap.
+- Help argparse (`--help`) tetap berbahasa Inggris seperti sebelumnya.
+
+### Masalah yang diketahui
+- Teks bawaan Qt (menu klik kanan kolom isian, dialog file non-native) berbahasa Inggris di kedua
+  mode: aplikasi tidak memasang `QTranslator`, dan PySide6 6.11.2 tidak menyertakan terjemahan
+  Indonesia (`qtbase_id.qm` tidak ada).
+- Nama sesi hasil duplikat memakai akhiran bahasa saat duplikasi dibuat ("(salinan)" / "(copy)");
+  nama yang sudah tersimpan tidak diterjemahkan.

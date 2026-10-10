@@ -15,6 +15,9 @@ SRC = Path(pyssh.__file__).parent
 NO_QT = [
     "config.py",
     "models.py",
+    "strings.py",
+    "strings_en.py",
+    "i18n.py",
     "core/__init__.py",
     "core/database.py",
     "core/session_store.py",
@@ -171,6 +174,7 @@ _UI_TEXT_CALLS = {
 
 
 _LOGGERS = {"log", "logger", "logging"}
+_TEXT_MODULES = {"strings.py", "strings_en.py"}
 
 
 def _call_name(node: ast.Call) -> str | None:
@@ -189,7 +193,7 @@ def test_ui_text_comes_from_strings_module() -> None:
     offenders = []
     for path in _all_sources():
         rel = str(path.relative_to(SRC))
-        if rel == "strings.py":
+        if rel in _TEXT_MODULES:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -202,3 +206,55 @@ def test_ui_text_comes_from_strings_module() -> None:
                     ):
                         offenders.append(f"{rel}:{node.lineno} {arg.value!r}")
     assert offenders == []
+
+
+def _strings_read_at_import(path: Path) -> list[str]:
+    """``strings.NAME`` reads that run on import: module/class level, defaults, decorators."""
+    found: list[str] = []
+
+    def visit(node: ast.AST) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            defaults = [*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)]
+            decorators = [] if isinstance(node, ast.Lambda) else node.decorator_list
+            for child in (*defaults, *decorators):
+                visit(child)
+            return  # the body runs only when called
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "strings"
+        ):
+            found.append(f"{path.relative_to(SRC)}:{node.lineno} strings.{node.attr}")
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(ast.parse(path.read_text(encoding="utf-8")))
+    return found
+
+
+def test_ui_text_is_read_when_used() -> None:
+    """``i18n.set_language`` swaps ``strings`` at startup; a copy made on import would stay."""
+    offenders = [hit for path in _all_sources() for hit in _strings_read_at_import(path)]
+    assert offenders == []
+
+
+def test_ui_text_imported_only_as_module() -> None:
+    """``from pyssh.strings import NAME`` would also freeze the text at import time."""
+    offenders = [
+        str(path.relative_to(SRC))
+        for path in _all_sources()
+        if any(
+            name.startswith(("pyssh.strings.", "pyssh.strings_en."))
+            for name in _imported_modules(path)
+        )
+    ]
+    assert offenders == []
+
+
+def test_only_i18n_imports_english_texts() -> None:
+    offenders = [
+        str(path.relative_to(SRC))
+        for path in _all_sources()
+        if "pyssh.strings_en" in _imported_modules(path)
+    ]
+    assert offenders == ["i18n.py"]

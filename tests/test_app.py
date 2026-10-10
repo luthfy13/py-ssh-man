@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import threading
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pyssh import app as app_module
 from pyssh.logging_setup import shutdown_logging
+from pyssh.ui.main_window import MainWindow
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +35,7 @@ def _close_windows_soon() -> None:
 
 def test_version_prints_and_exits(capsys: pytest.CaptureFixture[str], pyssh_home: Path) -> None:
     assert app_module.main(["--version"]) == 0
-    assert capsys.readouterr().out == "PySSH 0.1.0\n"
+    assert capsys.readouterr().out == "PySSH 0.2.0\n"
     assert list(pyssh_home.iterdir()) == []  # nothing created
 
 
@@ -146,3 +148,75 @@ def test_invalid_connect_argument_exits(capsys: pytest.CaptureFixture[str]) -> N
         app_module.main(["--connect", "nohost"])
     assert info.value.code == 2
     assert "user@host[:port]" in capsys.readouterr().err
+
+
+def _save_language(pyssh_home: Path, language: str) -> None:
+    data = {"version": 1, "settings": {"language": language}}
+    (pyssh_home / "settings.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_startup_uses_saved_language(qapp, pyssh_home: Path) -> None:
+    _save_language(pyssh_home, "en")
+    menus: list[str] = []
+
+    def inspect_and_close() -> None:
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow) and widget.isVisible():  # not earlier tests'
+                menus.extend(action.text() for action in widget.menuBar().actions())
+            widget.close()
+
+    QTimer.singleShot(50, inspect_and_close)
+    assert app_module.main([]) == 0
+    assert menus == ["&File", "&Session", "&View", "&Help"]
+    log_text = (pyssh_home / "logs" / "pyssh.log").read_text(encoding="utf-8")
+    assert "(language en)" in log_text
+
+
+def test_unsupported_saved_language_starts_in_indonesian(qapp, pyssh_home: Path) -> None:
+    _save_language(pyssh_home, "fr")
+    menus: list[str] = []
+
+    def inspect_and_close() -> None:
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow) and widget.isVisible():  # not earlier tests'
+                menus.extend(action.text() for action in widget.menuBar().actions())
+            widget.close()
+
+    QTimer.singleShot(50, inspect_and_close)
+    assert app_module.main([]) == 0
+    assert menus == ["&Berkas", "&Sesi", "&Tampilan", "Ba&ntuan"]
+
+
+def test_invalid_connect_argument_in_saved_language(
+    pyssh_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _save_language(pyssh_home, "en")
+    with pytest.raises(SystemExit) as info:
+        app_module.main(["--connect", "nohost"])
+    assert info.value.code == 2
+    assert "--connect must be in the form user@host[:port]" in capsys.readouterr().err
+    assert sorted(p.name for p in pyssh_home.iterdir()) == ["settings.json"]  # nothing created
+
+
+def test_unlock_dialog_at_startup_in_english(
+    qapp, pyssh_home: Path, fast_kdf, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyssh.core.database import Database
+    from pyssh.core.vault import Vault
+    from pyssh.ui.vault_dialogs import UnlockDialog
+
+    db = Database(pyssh_home / "pyssh.db")
+    db.open()
+    Vault(db, fast_kdf).initialize("master-pass-1")
+    db.close()
+    _save_language(pyssh_home, "en")
+    seen: list[str] = []
+
+    def skip(dialog: UnlockDialog) -> int:
+        seen.append(dialog.reject_button.text())
+        return 0
+
+    monkeypatch.setattr(UnlockDialog, "exec", skip)
+    _close_windows_soon()
+    assert app_module.main([]) == 0
+    assert seen == ["Skip"]
