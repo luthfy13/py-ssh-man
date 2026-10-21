@@ -70,6 +70,8 @@ class SettingsDialog(QDialog):
         self.copy_check.setChecked(current.copy_on_select)
         self.bold_check = QCheckBox(strings.SETTINGS_BOLD_BRIGHT)
         self.bold_check.setChecked(current.bold_is_bright)
+        self.prompt_check = QCheckBox(strings.SETTINGS_HIGHLIGHT_PROMPT)
+        self.prompt_check.setChecked(current.highlight_prompt)
         self.confirm_check = QCheckBox(strings.SETTINGS_CONFIRM_CLOSE)
         self.confirm_check.setChecked(current.confirm_on_close)
         self.option_meta_check = QCheckBox(strings.SETTINGS_OPTION_META)
@@ -86,6 +88,7 @@ class SettingsDialog(QDialog):
         form.addRow(strings.SETTINGS_SCROLLBACK, self.scrollback_spin)
         form.addRow("", self.copy_check)
         form.addRow("", self.bold_check)
+        form.addRow("", self.prompt_check)
         form.addRow("", self.confirm_check)
         form.addRow(strings.SETTINGS_KEEPALIVE, self.keepalive_spin)
         form.addRow(strings.SETTINGS_TIMEOUT, self.timeout_spin)
@@ -116,6 +119,7 @@ class SettingsDialog(QDialog):
             scrollback_lines=self.scrollback_spin.value(),
             copy_on_select=self.copy_check.isChecked(),
             bold_is_bright=self.bold_check.isChecked(),
+            highlight_prompt=self.prompt_check.isChecked(),
             confirm_on_close=self.confirm_check.isChecked(),
             keepalive_seconds=self.keepalive_spin.value(),
             connect_timeout_seconds=self.timeout_spin.value(),

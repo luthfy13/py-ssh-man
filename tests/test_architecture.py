@@ -30,6 +30,7 @@ NO_QT = [
     "core/errors.py",
     "terminal/emulator.py",
     "terminal/colors.py",
+    "terminal/prompt.py",
 ]
 QTCORE_ONLY = ["core/ssh_worker.py", "shortcuts.py", "terminal/keymap.py"]
 

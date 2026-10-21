@@ -35,7 +35,7 @@ def _close_windows_soon() -> None:
 
 def test_version_prints_and_exits(capsys: pytest.CaptureFixture[str], pyssh_home: Path) -> None:
     assert app_module.main(["--version"]) == 0
-    assert capsys.readouterr().out == "PySSH 0.2.1\n"
+    assert capsys.readouterr().out == "PySSH 0.3.0\n"
     assert list(pyssh_home.iterdir()) == []  # nothing created
 
 
@@ -231,4 +231,4 @@ def test_version_without_home_directory(
     monkeypatch.setattr(app_module.config, "get_paths", no_home)
     assert app_module.saved_language() == "id"
     assert app_module.main(["--version"]) == 0
-    assert capsys.readouterr().out == "PySSH 0.2.1\n"
+    assert capsys.readouterr().out == "PySSH 0.3.0\n"

@@ -1076,3 +1076,174 @@ lainnya berasal dari working tree gabungan.
     pemotongan chunk di posisi mana pun (diperiksa untuk contoh ini: satu chunk, per byte, dan dua
     potongan di setiap titik); syaratnya hanya `ESC` atau `ESC [` yang tidak selesai disela
     `CSI >`. Tidak diperbaiki di 0.2.1.
+
+## Fitur 0.3.0 — Pewarnaan prompt — 2026-10-21
+
+**Status:** SELESAI (agent); uji manual MT-P.x menunggu user
+**Permintaan user:** prompt `root@Server-OBE-UMI:~#` tampil polos; user memutuskan agar PySSH
+sendiri mengenali pola prompt dan mewarnainya saat digambar (tanpa mengubah data terminal).
+**Versi:** `0.3.0` (fitur baru; `0.2.1` sudah dirilis dan di-push, HEAD `9f1ba87`).
+
+### Akar masalah
+Server mengirim prompt tanpa kode warna: `.bashrc` root bawaan Debian/Proxmox tidak mewarnai PS1.
+Bagi PySSH prompt hanyalah teks biasa, sehingga tidak ada yang bisa diwarnai. Perbaikannya ada di
+sisi tampilan: mengenali bentuk prompt pada satu baris layar dan mewarnai sel-selnya saat dirender.
+
+### Desain
+- **`terminal/prompt.py` (baru, tanpa Qt)**: `PromptSpan(start, end, role)` dan
+  `find_prompt(text) -> list[PromptSpan]`. `text` = isi satu baris layar dengan satu karakter per
+  kolom (sel "stub" karakter lebar diganti `"\0"`), sehingga indeks string = kolom. Tiga regex
+  terkompilasi di level modul, dicocokkan dari kolom 0, masing-masing boleh diawali satu prefiks
+  lingkungan `(…) ` seperti `(venv) `:
+  - Debian/Ubuntu/Proxmox: `user@host:path$ ` atau `#`;
+  - RHEL/Fedora/CentOS: `[user@host path]$ ` atau `#`;
+  - zsh bawaan macOS: `user@host path % `.
+  Hasilnya dua span: `userhost` (`user@host`) dan `path`. `user` = `[A-Za-z_][A-Za-z0-9_.-]*`,
+  `host` = `[A-Za-z0-9][A-Za-z0-9.-]*`, path tanpa spasi dan minimal satu karakter; karakter akhir
+  prompt harus diikuti spasi atau akhir baris. Baris tanpa `@` langsung ditolak. Tidak cocok → `[]`.
+- **`terminal/widget.py`**: `_prompt_roles(line, cols)` membangun string satu karakter per kolom
+  dan memetakan kolom → peran; hasilnya kosong bila `highlight_prompt` mati, emulator di alternate
+  screen, atau kolom 0 kosong/spasi. `_style(char, selected, override)` memasukkan `override` (peran
+  prompt) ke kunci cache gaya. `_compute_style` hanya mewarnai sel yang fg **dan** bg-nya
+  `"default"` dan tidak `reverse` (`_is_plain`): `userhost` = `theme.ansi[10]` (hijau terang,
+  `#16C60C` pada tema bawaan) dan `path` = `theme.ansi[12]` (biru terang, `#3B78FF`), keduanya
+  tebal. Seleksi tetap menimpa latar. Emulator, teks salinan, dan byte yang dikirim tidak disentuh.
+- **Pengaturan**: `AppSettings.highlight_prompt: bool = True`, divalidasi sebagai bool di
+  `settings_store` (nilai salah tipe → `True`). Dialog Pengaturan: kotak centang `prompt_check`
+  setelah "Teks tebal memakai warna terang". `MainWindow.apply_settings` meneruskan ke setiap
+  `TerminalWidget.apply_settings` (kosongkan cache gaya + repaint), sehingga berlaku langsung.
+- Teks: `SETTINGS_HIGHLIGHT_PROMPT` = "Warnai prompt shell (user@host:path)" / "Highlight the shell
+  prompt (user@host:path)".
+
+### Berkas yang diubah
+| Kelompok | Berkas |
+|---|---|
+| Kode | `src/pyssh/terminal/prompt.py` (baru), `src/pyssh/terminal/widget.py`, `src/pyssh/models.py`, `src/pyssh/core/settings_store.py`, `src/pyssh/ui/settings_dialog.py`, `src/pyssh/strings.py`, `src/pyssh/strings_en.py` |
+| Test | `tests/test_prompt.py` (baru), `tests/test_widget.py`, `tests/test_settings_store.py`, `tests/test_settings_dialog.py`, `tests/test_architecture.py` (`terminal/prompt.py` masuk daftar `NO_QT`) |
+| Versi 0.3.0 | `pyproject.toml`, `src/pyssh/__init__.py`, `tests/test_app.py`, `tests/test_main_window.py`, `tests/test_smoke.py` (hanya literal versi) |
+| Dokumen | `CHANGELOG.md`, `README.md`, `docs/PROGRESS.md` |
+
+### Test
+Hasil `pytest -q -p no:cacheprovider tests/test_prompt.py tests/test_widget.py
+tests/test_settings_store.py tests/test_settings_dialog.py`: **263 lulus**. Per berkas (jumlah di
+HEAD → sekarang): `test_prompt.py` 104 (baru), `test_widget.py` 39 → 82 (+43),
+`test_settings_store.py` 40 → 58 (+18), `test_settings_dialog.py` 10 → 19 (+9). Suite unit penuh
+895 → 1071 (+176); selisih lainnya satu test arsitektur (`terminal/prompt.py` tanpa impor Qt) dan
+satu test impor modul di `test_smoke.py`, keduanya berparameter dari daftar modul. Rincian
+selisihnya diperiksa dengan membandingkan id test di HEAD dan working tree.
+- **`find_prompt`** (`test_prompt.py`): ketiga pola, prefiks `(venv) `, akhir `#`/`$`/`%`, path
+  `~`, `/etc`, `~/a/b`; bukan prompt (teks biasa, email `a@b.com` di tengah baris, `user@host`
+  tanpa `:`/akhir, spasi di awal, tanpa spasi setelah `$`); kolom benar dengan karakter lebar
+  (`"\0"`) sebelum/di path; baris panjang patologis tidak membuat regex macet (batas 5 detik hanya
+  menangkap backtracking liar).
+- **Widget**: sel prompt hijau/biru tebal dan mengikuti `Theme` kustom; setiap bentuk prompt diperiksa
+  kolom demi kolom, di 24 baris layar dan di scrollback; sel berwarna dari server tidak berubah
+  (fg, bg, reverse, 256 warna, truecolor; dibandingkan dengan widget yang fiturnya mati); alternate
+  screen dan pengaturan mati → tidak diwarnai; menyalakan/mematikan lewat `apply_settings`;
+  seleksi tetap menimpa latar; teks salinan, data emulator, dan byte terkirim tidak berubah; satu
+  test piksel (`grab()`) memeriksa rona hijau/biru dan baris di bawah prompt identik (dilewati bila
+  platform tidak menggambar glyph).
+- **Pengaturan**: default `True`, berkas lama tanpa kunci → `True`, simpan-baca ulang, nilai salah
+  tipe (`0`, `"false"`, `None`, …) → `True` tanpa menganggap berkas rusak; kotak centang
+  terpilih sesuai pengaturan, tersimpan, letaknya di antara "tebal" dan "konfirmasi"; paritas teks
+  kedua bahasa.
+- Warna sel dibaca lewat `TerminalWidget._runs()` (fg, bg, tebal per sel; tidak bergantung font).
+  Agen testing memastikan test benar-benar menangkap kesalahan dengan memutasi widget lewat plugin
+  pytest sementara di luar repo: tanpa `find_prompt`, mewarnai sel yang sudah berwarna, mengabaikan
+  alternate screen, mengabaikan pengaturan, menukar hijau dan biru, tanpa tebal, dan `override`
+  dicabut dari kunci cache gaya; tiap mutasi membuat 2 sampai 25 test gagal.
+- Jalur pengaturan → terminal terbuka lewat `MainWindow.apply_settings` tidak punya test khusus untuk
+  pengaturan ini; jalur yang sama diuji oleh `test_settings_apply_to_open_terminals` yang sudah ada
+  (dengan `font_size`), dan sisi widget oleh test `apply_settings` di atas.
+
+### Pengukuran paint
+Diukur **offscreen** (`QT_QPA_PLATFORM=offscreen`, Python 3.12, grid 80×24), bukan di desktop
+nyata, oleh agen testing (median dari run yang diselang-seling); tidak ada nilai yang di-assert di
+test. Waktu `paintEvent`:
+
+| Isi layar | Fitur mati | Fitur aktif | Selisih |
+|---|---|---|---|
+| 24 baris prompt | 2355 µs | 3721 µs | +1366 µs (+58 %) |
+| 24 prompt berwarna dari server | 3095 µs | 3627 µs | +532 µs (+17 %) |
+| 24 baris berisi `@` tetapi bukan prompt | 2446 µs | 2793 µs | +348 µs (+14 %) |
+| 24 baris polos tanpa `@` | 2556 µs | 2717 µs | +161 µs (+6 %) |
+| layar kosong (shell menganggur) | 2167 µs | 2038 µs | di bawah derau |
+
+- Pada layar 24 baris prompt, 24 panggilan `_runs` saja naik 1522 → 1873 µs (+351 µs, ≈ +15 µs per
+  baris prompt); seluruh `paintEvent` naik ≈ +57 µs per baris prompt (+1366 µs / 24). Sebagian besar
+  selisih ada di penggambaran: satu baris prompt berubah dari 1 run menjadi sekitar 4 (`user@host`,
+  `:`, path, sisanya) sehingga ada lebih banyak isi latar, pergantian font tebal, dan `drawText`.
+  Layar biasa dengan beberapa prompt diperkirakan di bawah 0,3 ms.
+- Pengukuran agen implementasi (offscreen, median 5 run × 300 paint) searah: 24 baris prompt
+  2,78 → 3,73 ms; satu prompt dan 23 baris output biasa 2,88 → 3,21 ms. Angka mutlak kedua agen
+  sedikit berbeda (derau antar run); tambahannya sekitar 0,3 sampai 1,4 ms per repaint penuh.
+  Komentar di `widget.py` menyebut repaint penuh ≈ 7 ms.
+- Sisa biaya yang diketahui: `_prompt_roles` membangun string 80 karakter untuk setiap baris tidak
+  kosong sebelum cek `@` di `find_prompt` (≈ 12,5 sampai 13,6 µs per baris pada 80 kolom). Tidak
+  dioptimalkan (lihat evaluasi).
+
+### Evaluasi Opus
+Lensa "prompt": **tidak ada temuan terkonfirmasi**. Tiga temuan ditolak:
+1. *Prompt di scrollback kehilangan warna saat aplikasi layar penuh terbuka.* Perilakunya nyata
+   (baris scrollback `root@host:~# echo 5` hijau di layar utama, polos setelah `ESC[?1049h` dan
+   scroll mundur), tetapi sesuai spec B.3: aturan bergantung pada status emulator (tidak di
+   alternate screen), bukan asal baris. Dampaknya kosmetik; mengubahnya berarti mengubah spec.
+2. *String baris dibangun untuk setiap baris tidak kosong sebelum cek `@`.* Biayanya nyata
+   (≈ 12 sampai 22 % dari `_runs`; prototipe penolakan dini ≈ 0,4 sampai 1,3 µs) tetapi ini
+   optimasi, bukan cacat: spec hanya meminta regex terkompilasi dan dampak yang diukur, tanpa
+   anggaran angka, dan tidak ada masukan yang menghasilkan keluaran salah.
+3. *Versi baru hanya naik ke 0.2.1.* Benar untuk commit pertama; kenaikan ke 0.3.0 memang bagian
+   commit kedua (fitur ini) bersama dokumen, yang dikerjakan pada tahap ini.
+
+Dua temuan terkonfirmasi pada lensa emulator menyangkut perbaikan 0.2.1 dan dicatat di bagian
+"Perbaikan 0.2.1 — Scroll nano".
+
+### Quality Gate
+Dijalankan pada working tree 0.3.0 (HEAD `9f1ba87` + fitur ini + versi 0.3.0).
+
+| Cek | Hasil |
+|---|---|
+| ruff check (`src tests tools`) | All checks passed! |
+| ruff format --check (`src tests tools`) | 81 file sudah terformat |
+| pytest (unit, `-m "not integration"`) | 1071 lulus, 20 di-deselect, 0 gagal |
+| pytest empat berkas fitur (`test_prompt`, `test_widget`, `test_settings_store`, `test_settings_dialog`) | 263 lulus |
+| pytest (integration), password `secret`, sshd lokal port 2222 | 19 lulus, 1 dilewati (audit secret: butuh password unik) |
+
+### Checklist manual (diisi user)
+- [ ] MT-P.1 Login ke server Proxmox atau Debian yang prompt-nya tanpa warna dari server
+  (`root@host:~#`) → `user@host` hijau tebal dan path biru tebal; tanda `#` dan teks yang diketik
+  sesudahnya berwarna biasa. — OS: — hasil:
+- [ ] MT-P.2 Jalankan perintah dengan output biasa (mis. `ls`, `cat /etc/hostname`) → output tidak
+  diwarnai PySSH (hanya warna dari server, mis. `ls --color`); buka vim atau nano → tidak ada yang
+  diwarnai. — OS: — hasil:
+- [ ] MT-P.3 **Berkas → Pengaturan…** → hapus centang "Warnai prompt shell (user@host:path)" →
+  Simpan: prompt di tab yang sedang terbuka langsung tampil polos tanpa membuka ulang aplikasi;
+  centang lagi → Simpan: berwarna kembali. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- Spec menulis prefiks lingkungan sebagai `(\S+) `; diimplementasikan sebagai token berkurung
+  `\(\S+\) ` (contoh `(venv) `, `(base) `) agar teks seperti `foo user@host:~$ ` tidak dikenali
+  sebagai prompt. Hanya satu prefiks yang diterima (`(a) (b) user@host:~$ ` tidak dikenali).
+- Pola zsh hanya menerima `%` (sesuai spec), sehingga prompt zsh untuk root (`user@host path # `)
+  tidak diwarnai. Diperiksa langsung: `find_prompt("root@mac ~ # ")` → `[]`.
+- Konstanta `ROLE_USERHOST`/`ROLE_PATH` ditambahkan di `prompt.py` (nilainya `"userhost"` dan
+  `"path"` seperti spec); `override` di `_style`/`_compute_style` adalah peran prompt, bukan warna,
+  dan syarat sel tanpa warna diperiksa di `_compute_style`.
+- Nama atribut kotak centang (`prompt_check`) dipilih agen implementasi karena spec tidak
+  menamainya.
+- Fitur hanya mengubah gambar: tidak ada perubahan di emulator, teks salinan, atau byte terkirim.
+
+### Masalah yang diketahui
+- Pengenalan berdasarkan bentuk teks: output yang kebetulan berbentuk `user@host:path$ ` di awal
+  baris ikut diwarnai (spec B.6).
+- Prompt dengan format lain tidak dikenali, mis. tema oh-my-zsh dan PS1 kustom tanpa `user@host`
+  (spec B.6).
+- Prompt zsh root dengan `#` tidak dikenali (lihat Penyimpangan).
+- Prompt harus mulai di kolom pertama; spasi di awal baris berarti bukan prompt.
+- Pewarnaan dinilai per sel: bila server hanya mewarnai sebagian prompt, bagian yang tanpa warna
+  tetap diwarnai PySSH. Diperiksa pada widget dengan masukan `\x1b[32mroot@host\x1b[0m:~# `:
+  `user@host` tetap hijau milik server (`#13A10E`, tidak tebal), sedangkan path (`~`) menjadi biru
+  tebal PySSH (`#3B78FF`).
+- Selama aplikasi layar penuh terbuka, prompt di scrollback juga tidak diwarnai (evaluasi, temuan 1).
+- Angka paint hanya dari pengukuran offscreen; belum ada pengukuran di desktop nyata. Perilaku di
+  server nyata hanya bisa dipastikan lewat MT-P.1 sampai MT-P.3.

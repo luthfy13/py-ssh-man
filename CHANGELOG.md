@@ -2,6 +2,23 @@
 
 Semua perubahan penting pada PySSH dicatat di file ini.
 
+## [0.3.0] — 2026-10-21
+
+### Ditambahkan
+- **Pewarnaan prompt shell**: prompt di awal baris dikenali dan diwarnai saat digambar —
+  `user@host` hijau tebal dan path biru tebal. Berguna untuk server yang tidak mewarnai prompt-nya,
+  mis. `root@Server-OBE-UMI:~#` pada Debian/Proxmox (`.bashrc` root bawaan tidak memberi warna).
+  Pola yang dikenali: Debian/Ubuntu/Proxmox (`user@host:path$` atau `#`), RHEL/Fedora/CentOS
+  (`[user@host path]$` atau `#`), dan zsh bawaan macOS (`user@host path %`), masing-masing boleh
+  diawali satu prefiks lingkungan seperti `(venv) `.
+  - Hanya teks yang **tanpa warna** dari server yang diwarnai; sel yang sudah diberi warna oleh
+    server tidak diubah.
+  - Tidak aktif di layar penuh (alternate screen: vim, htop, less, nano).
+  - Hanya tampilan: teks yang disalin dan data yang dikirim ke server tidak berubah.
+  - Pengaturan **Warnai prompt shell (user@host:path)** di **Berkas → Pengaturan…**, default aktif,
+    berlaku langsung di tab yang sedang terbuka.
+- Pengaturan `highlight_prompt` di `settings.json` (`true`/`false`; nilai lain → `true`).
+
 ## [0.2.1] — 2026-10-21
 
 ### Diperbaiki

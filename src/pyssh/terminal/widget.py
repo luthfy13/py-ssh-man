@@ -36,6 +36,7 @@ from pyssh.models import AppSettings
 from pyssh.terminal.colors import Theme, resolve_color
 from pyssh.terminal.emulator import TerminalEmulator
 from pyssh.terminal.keymap import key_to_bytes
+from pyssh.terminal.prompt import ROLE_PATH, ROLE_USERHOST, find_prompt
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,9 @@ FONT_FALLBACKS = {
 }
 
 _LOCAL_COLORS = {"red": 31, "green": 32, "yellow": 33, "blue": 34, "magenta": 35, "cyan": 36}
+# Prompt highlight (a recognised ``user@host:path`` prompt): role -> index in ``Theme.ansi``
+# (bright green and bright blue); both are drawn bold.
+_PROMPT_ANSI = {ROLE_USERHOST: 10, ROLE_PATH: 12}
 
 
 def default_font_families(
@@ -690,7 +694,8 @@ class TerminalWidget(QWidget):
             self._colors[value] = color
         return color
 
-    def _style(self, char, selected: bool) -> tuple:
+    def _style(self, char, selected: bool, override: str | None = None) -> tuple:
+        """Cached style of a cell; ``override`` is a prompt role (``None`` = no highlight)."""
         key = (
             char.fg,
             char.bg,
@@ -700,27 +705,48 @@ class TerminalWidget(QWidget):
             char.strikethrough,
             char.reverse,
             selected,
+            override,
         )
         style = self._styles.get(key)
         if style is None:
-            style = self._compute_style(char, selected)
+            style = self._compute_style(char, selected, override)
             self._styles[key] = style
         return style
 
-    def _compute_style(self, char, selected: bool) -> tuple:
+    def _compute_style(self, char, selected: bool, override: str | None = None) -> tuple:
         theme = self._theme
         bright = self._settings.bold_is_bright
-        fg = resolve_color(char.fg, is_fg=True, bold=char.bold, theme=theme, bold_is_bright=bright)
-        bg = resolve_color(char.bg, is_fg=False, bold=char.bold, theme=theme, bold_is_bright=bright)
+        bold = char.bold
+        fg = resolve_color(char.fg, is_fg=True, bold=bold, theme=theme, bold_is_bright=bright)
+        bg = resolve_color(char.bg, is_fg=False, bold=bold, theme=theme, bold_is_bright=bright)
+        if override in _PROMPT_ANSI and _is_plain(char):
+            # A prompt cell the server left uncolored; colored cells keep the server's colors.
+            fg = theme.ansi[_PROMPT_ANSI[override]]
+            bold = True
         if char.reverse:
             fg, bg = bg, fg
         if selected:
             bg = theme.selection
-        return fg, bg, char.bold, char.italics, char.underscore, char.strikethrough
+        return fg, bg, bold, char.italics, char.underscore, char.strikethrough
+
+    def _prompt_roles(self, line, cols: int) -> dict[int, str]:
+        """Column -> prompt role for a recognised shell prompt on this line (else empty)."""
+        if not self._settings.highlight_prompt or self._emulator.in_alt_screen:
+            return {}
+        if line[0].data in ("", " "):  # empty line or leading space: never a prompt
+            return {}
+        # One character per column; the stub of a wide character becomes "\0".
+        text = "".join([line[x].data[:1] or "\0" for x in range(cols)])
+        roles: dict[int, str] = {}
+        for span in find_prompt(text):
+            for x in range(span.start, span.end):
+                roles[x] = span.role
+        return roles
 
     def _runs(self, line_index: int, selection) -> list[_Run]:
         line = self._emulator.line_at(line_index)
         cols = self._emulator.cols
+        roles = self._prompt_roles(line, cols)
         runs: list[_Run] = []
         x = 0
         while x < cols:
@@ -730,7 +756,7 @@ class TerminalWidget(QWidget):
                 continue
             width = 2 if x + 1 < cols and line[x + 1].data == "" else 1
             selected = selection is not None and selection[0] <= (line_index, x) < selection[1]
-            style = self._style(char, selected)
+            style = self._style(char, selected, roles.get(x) if roles else None)
             if runs and runs[-1].style == style and runs[-1].end == x:
                 run = runs[-1]
             else:
@@ -846,6 +872,11 @@ class TerminalWidget(QWidget):
             self._perf_window_start = now
             self._perf_max_lag = 0.0
             self._perf_bytes = 0
+
+
+def _is_plain(char) -> bool:
+    """True for a cell without server colors: default fg and bg, not reversed."""
+    return char.fg == "default" and char.bg == "default" and not char.reverse
 
 
 def _clamp(value: int, low: int, high: int) -> int:

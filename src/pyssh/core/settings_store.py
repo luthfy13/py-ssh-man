@@ -25,7 +25,13 @@ CLAMP_RANGES: dict[str, tuple[int, int]] = {
     "keepalive_seconds": (0, 600),
     "connect_timeout_seconds": (3, 120),
 }
-_BOOL_FIELDS = {"copy_on_select", "bold_is_bright", "confirm_on_close", "mac_option_as_meta"}
+_BOOL_FIELDS = {
+    "copy_on_select",
+    "bold_is_bright",
+    "highlight_prompt",
+    "confirm_on_close",
+    "mac_option_as_meta",
+}
 _STR_FIELDS = {"font_family"}
 _LANGUAGE_FIELD = "language"
 _OPTIONAL_STR_FIELDS = {"window_geometry", "window_state", "splitter_state"}

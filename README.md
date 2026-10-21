@@ -12,6 +12,8 @@ khusus untuk sesi SSH interaktif. Ditulis dengan Python, PySide6 (Qt 6), paramik
 - Verifikasi host key (Trust On First Use) dengan file `known_hosts` milik aplikasi.
 - Terminal `xterm-256color`: 16/256/truecolor, atribut teks, scrollback, seleksi, copy/paste
   (termasuk bracketed paste), zoom font, alternate screen untuk vim/htop/less.
+- Pewarnaan prompt shell: prompt yang tidak diwarnai server (mis. `root@host:~#` pada
+  Debian/Proxmox) dikenali dan diwarnai (`user@host` hijau, path biru); bisa dimatikan di Pengaturan.
 - Bahasa antarmuka: Bahasa Indonesia (default) atau English.
 
 Spesifikasi lengkap: [`docs/SPEC.md`](docs/SPEC.md). Laporan per fase:
@@ -88,6 +90,37 @@ memindahkan item pengaturan ke menu aplikasi (menu paling kiri). Bahasa baru ber
 aplikasi ditutup dan dibuka ulang. Tab demo (`--demo`) juga mengikuti bahasa terpilih. Pilihan disimpan sebagai `"language"` (`"id"`/`"en"`)
 di `settings.json`; nilai lain dianggap `"id"`. Teks bawaan Qt (mis. menu klik kanan kolom isian:
 Undo/Cut/Copy/Paste) selalu berbahasa Inggris karena Qt tidak menyediakan terjemahan Indonesia.
+
+### Pewarnaan prompt shell
+
+Banyak server tidak mewarnai prompt-nya (`.bashrc` root bawaan Debian/Proxmox, misalnya), sehingga
+`root@Server-OBE-UMI:~#` sulit dibedakan dari output perintah. PySSH mengenali bentuk prompt di awal
+baris dan mewarnainya saat digambar: `user@host` hijau tebal dan path biru tebal.
+
+Pola yang dikenali, dicocokkan mulai dari kolom pertama baris dan boleh diawali satu prefiks
+lingkungan seperti `(venv) ` atau `(base) `:
+
+| Gaya | Contoh |
+|---|---|
+| Debian, Ubuntu, Proxmox | `user@host:~/proyek$`, `root@host:/etc#` |
+| RHEL, Fedora, CentOS | `[user@host proyek]$`, `[root@host /etc]#` |
+| zsh bawaan macOS | `user@host ~ %` |
+
+- Hanya teks yang **tanpa warna** dari server yang diwarnai; teks yang sudah diberi warna oleh
+  server tidak diubah.
+- Tidak aktif di layar penuh (alternate screen: vim, htop, less, nano).
+- Hanya mengubah tampilan: teks yang disalin dan data yang dikirim ke server tidak berubah.
+- Matikan atau hidupkan di **Berkas → Pengaturan… → Warnai prompt shell (user@host:path)** (macOS:
+  menu aplikasi). Default aktif dan berlaku langsung di tab yang sedang terbuka. Pilihan disimpan
+  sebagai `"highlight_prompt"` (`true`/`false`) di `settings.json`; nilai lain dianggap `true`.
+
+Batasan:
+
+- Pengenalan berdasarkan bentuk teks, bukan berdasarkan pengetahuan mana yang prompt: output yang
+  kebetulan berbentuk `user@host:path$ ` di awal baris ikut diwarnai.
+- Prompt dengan format lain tidak dikenali, mis. tema oh-my-zsh dan PS1 kustom tanpa `user@host`.
+- Prompt zsh untuk root (`user@host path # `) tidak dikenali: pola zsh hanya menerima `%`. Prompt
+  Debian/RHEL dengan `#` dikenali.
 
 ### Shortcut utama
 
@@ -169,6 +202,8 @@ setiap push dan pull request (tanpa test integrasi).
 - Baris yang ter-wrap disalin sebagai beberapa baris.
 - Mengecilkan jumlah baris membuang baris teratas layar (tidak masuk scrollback).
 - Tanpa mouse reporting ke aplikasi remote.
+- Pewarnaan prompt shell hanya mengenali pola tertentu dan bisa ikut mewarnai output yang berbentuk
+  prompt (lihat bagian "Pewarnaan prompt shell").
 - Membuka private key ber-passphrase dan membuka vault bisa menahan tampilan sesaat (kursor tunggu).
 - Metadata sesi (nama, host, username, path key) tidak dienkripsi.
 - Menjalankan dua instance bersamaan tidak didukung resmi.

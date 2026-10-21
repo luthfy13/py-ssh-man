@@ -87,6 +87,7 @@ class AppSettings:
     scrollback_lines: int = 5000
     copy_on_select: bool = True
     bold_is_bright: bool = True
+    highlight_prompt: bool = True  # color a recognised shell prompt (terminal/prompt.py)
     confirm_on_close: bool = True
     keepalive_seconds: int = 30
     connect_timeout_seconds: int = 10

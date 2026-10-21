@@ -31,7 +31,7 @@ def test_module_imports(module_name: str) -> None:
 
 
 def test_version() -> None:
-    assert pyssh.__version__ == "0.2.1"
+    assert pyssh.__version__ == "0.3.0"
 
 
 def test_main_window_created(qtbot, services) -> None:

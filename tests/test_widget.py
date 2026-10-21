@@ -6,12 +6,13 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QGuiApplication, QInputMethodEvent, QWheelEvent
+from PySide6.QtGui import QColor, QGuiApplication, QInputMethodEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from pyssh import shortcuts, strings
 from pyssh.models import AppSettings
 from pyssh.terminal import widget as widget_module
+from pyssh.terminal.colors import Theme
 from pyssh.terminal.view import TerminalView
 from pyssh.terminal.widget import (
     BACKPRESSURE_HIGH,
@@ -495,3 +496,375 @@ def test_middle_click_without_selection_support_does_nothing(term: TerminalWidge
     sent = _record(term.input_bytes)
     qtbot.mouseClick(term, Qt.MouseButton.MiddleButton, pos=QPoint(20, 10))
     assert sent == []
+
+
+# ----- shell prompt highlight (design B.3, B.5) --------------------------------------------
+#
+# Colors are observed through the widget's own run/style helper (``_runs``): it yields, for
+# every screen row, the (fg, bg, bold, italics, underscore, strikethrough) that ``paintEvent``
+# draws each cell with. That is exact and independent of fonts; a few tests also look at the
+# pixels of ``grab()``.
+
+_THEME = Theme()
+_PLAIN = (_THEME.foreground, _THEME.background, False, False, False, False)
+_USERHOST = (_THEME.ansi[10], _THEME.background, True, False, False, False)  # bright green, bold
+_PATH = (_THEME.ansi[12], _THEME.background, True, False, False, False)  # bright blue, bold
+_PROMPT = "root@Server-OBE-UMI:~# "  # userhost = columns 0-18, ':' = 19, path = 20, '#' = 21
+
+
+def _prompt_term(qtbot, theme: Theme | None = None, **settings) -> TerminalWidget:
+    widget = TerminalWidget(replace(AppSettings(), **settings), theme)
+    qtbot.addWidget(widget)
+    widget.resize(800, 400)
+    widget.show()
+    qtbot.waitExposed(widget)
+    return widget
+
+
+def _show(widget: TerminalWidget, text: str | bytes) -> None:
+    widget.feed(text.encode() if isinstance(text, str) else text)
+    widget.flush_pending()
+
+
+def _row_styles(widget: TerminalWidget, row: int, selection=None) -> list[tuple]:
+    """Style drawn for each column of screen row ``row`` (a wide character fills both columns)."""
+    styles: list[tuple] = [()] * widget.emulator.cols
+    for run in widget._runs(widget.emulator.history_len + row, selection):
+        for col, _data, width in run.cells:
+            for x in range(col, col + width):
+                styles[x] = run.style
+    return styles
+
+
+@pytest.fixture
+def prompt_term(qtbot) -> TerminalWidget:
+    return _prompt_term(qtbot)
+
+
+def test_highlight_prompt_is_on_by_default() -> None:
+    assert AppSettings().highlight_prompt is True
+
+
+def test_prompt_userhost_and_path_are_bright_green_and_blue_bold(prompt_term) -> None:
+    _show(prompt_term, _PROMPT + "ls -la")
+    styles = _row_styles(prompt_term, 0)
+    assert styles[0:19] == [_USERHOST] * 19  # root@Server-OBE-UMI
+    assert styles[19] == _PLAIN  # ':'
+    assert styles[20] == _PATH  # '~'
+    assert styles[21:] == [_PLAIN] * (len(styles) - 21)  # '# ls -la' and the empty rest
+
+
+def test_prompt_colors_come_from_the_theme(qtbot) -> None:
+    ansi = tuple(f"#{(index + 1) * 10:02X}{index:02X}00" for index in range(16))
+    theme = Theme(ansi=ansi)
+    widget = _prompt_term(qtbot, theme)
+    _show(widget, _PROMPT)
+    styles = _row_styles(widget, 0)
+    assert styles[0] == (ansi[10], theme.background, True, False, False, False)
+    assert styles[20] == (ansi[12], theme.background, True, False, False, False)
+    assert ansi[10] != _THEME.ansi[10] and ansi[12] != _THEME.ansi[12]
+
+
+@pytest.mark.parametrize("bold_is_bright", [True, False])
+def test_prompt_colors_do_not_depend_on_bold_is_bright(qtbot, bold_is_bright: bool) -> None:
+    widget = _prompt_term(qtbot, bold_is_bright=bold_is_bright)
+    _show(widget, _PROMPT)
+    styles = _row_styles(widget, 0)
+    assert styles[0] == _USERHOST
+    assert styles[20] == _PATH
+
+
+@pytest.mark.parametrize(
+    ("line", "userhost", "path"),
+    [
+        ("user@host:~$ ", (0, 9), (10, 11)),
+        ("root@host:/etc# ", (0, 9), (10, 14)),
+        ("[user@host ~/a/b]$ ", (1, 10), (11, 16)),
+        ("[root@host ~]# ", (1, 10), (11, 12)),
+        ("user@host ~ % ", (0, 9), (10, 11)),
+        ("(venv) user@host:~$ ", (7, 16), (17, 18)),
+        ("(base) [user@host ~]$ ", (8, 17), (18, 19)),
+        ("(venv) user@host ~/src % ", (7, 16), (17, 22)),
+    ],
+)
+def test_each_prompt_shape_is_colored_in_the_right_columns(
+    prompt_term, line: str, userhost: tuple[int, int], path: tuple[int, int]
+) -> None:
+    _show(prompt_term, line + "echo hi")
+    styles = _row_styles(prompt_term, 0)
+    for x, style in enumerate(styles):
+        if userhost[0] <= x < userhost[1]:
+            assert style == _USERHOST, x
+        elif path[0] <= x < path[1]:
+            assert style == _PATH, x
+        else:
+            assert style == _PLAIN, x
+
+
+def test_every_visible_row_is_checked(prompt_term) -> None:
+    rows = prompt_term.emulator.rows
+    _show(prompt_term, "\r\n".join(f"user@host:~/d{n}$ ls" for n in range(rows)))
+    for row in range(rows):
+        styles = _row_styles(prompt_term, row)
+        assert styles[0] == _USERHOST, row
+        assert styles[8] == _USERHOST, row
+        assert styles[9] == _PLAIN, row
+        assert styles[10] == _PATH, row
+        assert styles[-1] == _PLAIN, row
+
+
+def test_prompt_in_scrollback_is_colored_too(prompt_term) -> None:
+    emulator = prompt_term.emulator
+    _show(prompt_term, "\r\n".join(f"user@host:~$ echo {n}" for n in range(emulator.rows + 15)))
+    assert emulator.history_len >= 10
+    for line_index in (0, 5, emulator.history_len - 1):
+        run = prompt_term._runs(line_index, None)[0]
+        assert run.style == _USERHOST
+        assert (run.start, run.end) == (0, 9)
+    prompt_term.scroll_by(8)
+    assert not prompt_term.grab().isNull()
+
+
+def test_non_prompt_text_stays_plain(prompt_term) -> None:
+    lines = [
+        "hello world",
+        "echo root@host:~# ",
+        "write to a@b.com now",
+        "root@host",
+        "root@host:~",
+        " root@host:~# ",
+        "root@host:~#x",
+    ]
+    _show(prompt_term, "\r\n".join(lines))
+    for row in range(len(lines)):
+        assert _row_styles(prompt_term, row) == [_PLAIN] * prompt_term.emulator.cols, lines[row]
+
+
+def test_style_cache_does_not_leak_between_prompt_and_other_cells(prompt_term) -> None:
+    """Same characters and attributes, with and without the prompt override."""
+    _show(prompt_term, "root@host\r\nroot@host:~# \r\nroot@host")
+    for _ in range(2):  # the second round runs with warm style caches
+        assert _row_styles(prompt_term, 0)[0] == _PLAIN
+        assert _row_styles(prompt_term, 1)[0] == _USERHOST
+        assert _row_styles(prompt_term, 1)[10] == _PATH
+        assert _row_styles(prompt_term, 2)[0] == _PLAIN
+
+
+def test_overwriting_the_prompt_removes_its_colors(prompt_term) -> None:
+    _show(prompt_term, "root@host:~# ls")
+    assert _row_styles(prompt_term, 0)[0] == _USERHOST
+    _show(prompt_term, "\r\x1b[2Kplain text")
+    assert _row_styles(prompt_term, 0) == [_PLAIN] * prompt_term.emulator.cols
+
+
+def test_prompt_after_a_wide_character_path(prompt_term) -> None:
+    _show(prompt_term, "user@host:~/漢字$ ls")  # '漢' = columns 12-13, '字' = 14-15, '$' = 16
+    styles = _row_styles(prompt_term, 0)
+    assert styles[0:9] == [_USERHOST] * 9
+    assert styles[10:16] == [_PATH] * 6
+    assert styles[16] == _PLAIN
+    assert styles[17] == _PLAIN
+
+
+def test_wide_characters_before_the_prompt_shift_the_columns(prompt_term) -> None:
+    _show(prompt_term, "(漢字) user@host:~$ ")  # '(' + 4 columns + ')' + ' ' = 7 columns
+    styles = _row_styles(prompt_term, 0)
+    assert styles[0:7] == [_PLAIN] * 7
+    assert styles[7:16] == [_USERHOST] * 9
+    assert styles[16] == _PLAIN
+    assert styles[17] == _PATH
+    assert styles[18] == _PLAIN
+
+
+def test_bold_without_colors_from_the_server_is_still_highlighted(prompt_term) -> None:
+    _show(prompt_term, "\x1b[1muser@host\x1b[0m:\x1b[1m~\x1b[0m$ ")
+    styles = _row_styles(prompt_term, 0)
+    assert styles[0] == _USERHOST
+    assert styles[10] == _PATH
+
+
+_SERVER_COLOR_SGR = [
+    "31",  # foreground
+    "1;31",  # bold foreground
+    "01;32",  # the Ubuntu default
+    "44",  # background
+    "37;41",
+    "7",  # reverse
+    "38;5;208",  # 256 colors
+    "48;5;100",
+    "38;2;10;20;30",  # true color
+    "48;2;200;100;50",
+]
+
+
+@pytest.mark.parametrize("sgr", _SERVER_COLOR_SGR)
+def test_cells_colored_by_the_server_are_not_changed(qtbot, sgr: str) -> None:
+    data = f"\x1b[{sgr}muser@host\x1b[0m:\x1b[{sgr}m~/src\x1b[0m$ ls"
+    on = _prompt_term(qtbot)
+    off = _prompt_term(qtbot, highlight_prompt=False)
+    _show(on, data)
+    _show(off, data)
+    styles = _row_styles(on, 0)
+    assert styles == _row_styles(off, 0)
+    assert styles[0] != _PLAIN  # the server's colors are still there
+    assert styles[10] != _PLAIN
+    assert styles[9] == _PLAIN  # the ':' had no server colors and is not in a span
+
+
+def test_server_colors_are_kept_without_bright_bold(qtbot) -> None:
+    data = "\x1b[01;32muser@host\x1b[00m:\x1b[01;34m~\x1b[00m$ "
+    on = _prompt_term(qtbot, bold_is_bright=False)
+    off = _prompt_term(qtbot, bold_is_bright=False, highlight_prompt=False)
+    _show(on, data)
+    _show(off, data)
+    styles = _row_styles(on, 0)
+    assert styles == _row_styles(off, 0)
+    assert styles[0] == (_THEME.ansi[2], _THEME.background, True, False, False, False)
+    assert styles[10] == (_THEME.ansi[4], _THEME.background, True, False, False, False)
+
+
+def test_only_the_uncolored_cells_of_a_partly_colored_prompt_change(prompt_term) -> None:
+    _show(prompt_term, "us\x1b[31mer\x1b[0m@host:~$ ")
+    styles = _row_styles(prompt_term, 0)
+    red = (_THEME.ansi[1], _THEME.background, False, False, False, False)
+    assert styles[0:2] == [_USERHOST] * 2
+    assert styles[2:4] == [red] * 2
+    assert styles[4:9] == [_USERHOST] * 5
+    assert styles[10] == _PATH
+
+
+def test_colored_userhost_and_plain_path(prompt_term) -> None:
+    _show(prompt_term, "\x1b[35muser@host\x1b[0m:~$ ")
+    styles = _row_styles(prompt_term, 0)
+    assert styles[0] == (_THEME.ansi[5], _THEME.background, False, False, False, False)
+    assert styles[10] == _PATH
+
+
+def test_selection_still_sets_the_background(prompt_term) -> None:
+    _show(prompt_term, "root@host:~# ls")
+    line = prompt_term.emulator.history_len
+    prompt_term.set_selection((line, 0), (line, 12))
+    styles = _row_styles(prompt_term, 0, prompt_term.selection_range())
+    selected = _THEME.selection
+    assert styles[0] == (_THEME.ansi[10], selected, True, False, False, False)
+    assert styles[10] == (_THEME.ansi[12], selected, True, False, False, False)
+    assert styles[11] == (_THEME.foreground, selected, False, False, False, False)  # ':' ... '#'
+    assert styles[12] == _PLAIN  # outside the selection
+    assert prompt_term.selected_text() == "root@host:~#"
+
+
+def test_no_highlight_in_the_alternate_screen(prompt_term) -> None:
+    _show(prompt_term, "root@host:~# vim\r\n")
+    assert _row_styles(prompt_term, 0)[0] == _USERHOST
+    _show(prompt_term, "\x1b[?1049h\x1b[H" + "root@host:~# looks like a prompt\r\n[a@b ~]$ x")
+    assert prompt_term.emulator.in_alt_screen
+    for row in (0, 1):
+        assert _row_styles(prompt_term, row) == [_PLAIN] * prompt_term.emulator.cols
+    _show(prompt_term, "\x1b[?1049l")
+    assert not prompt_term.emulator.in_alt_screen
+    assert _row_styles(prompt_term, 0)[0] == _USERHOST  # the main screen is highlighted again
+
+
+def test_highlight_off_draws_prompts_plain(qtbot) -> None:
+    widget = _prompt_term(qtbot, highlight_prompt=False)
+    _show(widget, _PROMPT + "ls\r\n[user@host ~]$ x\r\nuser@host ~ % y")
+    for row in range(3):
+        assert _row_styles(widget, row) == [_PLAIN] * widget.emulator.cols
+
+
+def test_apply_settings_toggles_the_highlight_at_once(prompt_term) -> None:
+    _show(prompt_term, _PROMPT)
+    assert _row_styles(prompt_term, 0)[0] == _USERHOST
+    prompt_term.apply_settings(replace(AppSettings(), highlight_prompt=False))
+    assert _row_styles(prompt_term, 0) == [_PLAIN] * prompt_term.emulator.cols
+    prompt_term.apply_settings(replace(AppSettings(), highlight_prompt=True))
+    assert _row_styles(prompt_term, 0)[0] == _USERHOST
+    assert _row_styles(prompt_term, 0)[20] == _PATH
+
+
+def test_copied_text_and_terminal_data_are_unchanged(qtbot) -> None:
+    text = _PROMPT + "ls -la"
+    on = _prompt_term(qtbot)
+    off = _prompt_term(qtbot, highlight_prompt=False)
+    sent = _record(on.input_bytes)
+    for widget in (on, off):
+        _show(widget, text)
+        line = widget.emulator.history_len
+        widget.set_selection((line, 0), (line, 40))
+        assert widget.selected_text() == text
+        assert widget.copy_selection()
+        assert QGuiApplication.clipboard().text() == text
+        assert not widget.grab().isNull()
+    assert on.emulator.screen_lines_text() == off.emulator.screen_lines_text()
+    assert on.emulator.screen_lines_text()[0] == text
+    cell = on.emulator.line_at(on.emulator.history_len)[0]
+    assert (cell.fg, cell.bg, cell.bold) == ("default", "default", False)  # data not changed
+    assert sent == []  # nothing is sent to the server
+
+
+def _glyph_pixels(widget: TerminalWidget, image, row: int, start: int, end: int) -> list:
+    """Colors of all pixels of ``row`` between columns ``start`` and ``end`` (exclusive)."""
+    cw, ch = widget.cell_size
+    ratio = image.devicePixelRatio()
+    x0, x1 = int((PADDING + start * cw) * ratio), int((PADDING + end * cw) * ratio)
+    y0, y1 = int((PADDING + row * ch) * ratio), int((PADDING + (row + 1) * ch) * ratio)
+    return [image.pixelColor(x, y) for y in range(y0, y1) for x in range(x0, x1)]
+
+
+def _tint(pixels: list, channel: str) -> int:
+    """How much more ``channel`` ("g" or "b") the pixels have than the mean of the other two.
+
+    Gray text, even with sub-pixel antialiasing fringes, adds up to about zero; text drawn in
+    bright green (or blue) adds up to a large positive number.
+    """
+    total = 0
+    for color in pixels:
+        r, g, b = color.red(), color.green(), color.blue()
+        total += g - (r + b) // 2 if channel == "g" else b - (r + g) // 2
+    return total
+
+
+def test_painted_pixels_show_the_prompt_colors(qtbot) -> None:
+    widget = _prompt_term(qtbot, highlight_prompt=False)
+    line = "root@Server-OBE-UMI:/usr/local/share# ls"  # userhost 0-18, path 20-35
+    _show(widget, line)
+    off = widget.grab().toImage()
+    background = QColor(_THEME.background)
+    if all(c == background for c in _glyph_pixels(widget, off, 0, 0, 36)):
+        pytest.skip("this platform plugin draws no glyphs (no fonts)")
+    userhost_off = _tint(_glyph_pixels(widget, off, 0, 0, 19), "g")
+    path_off = _tint(_glyph_pixels(widget, off, 0, 20, 36), "b")
+    assert abs(userhost_off) < 5_000
+    assert abs(path_off) < 5_000
+
+    widget.apply_settings(replace(AppSettings(), highlight_prompt=True))
+    on = widget.grab().toImage()
+    assert _tint(_glyph_pixels(widget, on, 0, 0, 19), "g") - userhost_off > 20_000
+    assert _tint(_glyph_pixels(widget, on, 0, 20, 36), "b") - path_off > 15_000
+    assert abs(_tint(_glyph_pixels(widget, on, 0, 36, 40), "g")) < 5_000  # '# ls' stays plain
+    assert on != off
+    # Only the prompt cells differ between the images: the rows below are identical.
+    below = int((PADDING + widget.cell_size[1]) * on.devicePixelRatio()) + 1
+    assert on.copy(0, below, on.width(), on.height() - below) == off.copy(
+        0, below, off.width(), off.height() - below
+    )
+
+    widget.apply_settings(replace(AppSettings(), highlight_prompt=False))
+    assert widget.grab().toImage() == off
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"\x1b[?1049hroot@host:~# looks like a prompt",  # alternate screen
+        b"plain output\r\n a@b.com\r\n [user@host ~]$ ls",  # no prompt at column 0
+        b"\x1b[32muser@host\x1b[0m:\x1b[34m~\x1b[0m$ ls",  # colored by the server
+    ],
+    ids=["alt-screen", "no-prompt", "server-colors"],
+)
+def test_image_is_identical_with_and_without_the_feature(qtbot, data: bytes) -> None:
+    on = _prompt_term(qtbot)
+    off = _prompt_term(qtbot, highlight_prompt=False)
+    _show(on, data)
+    _show(off, data)
+    assert on.grab().toImage() == off.grab().toImage()

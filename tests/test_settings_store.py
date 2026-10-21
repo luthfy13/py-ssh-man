@@ -158,3 +158,63 @@ def test_read_language_on_undecodable_file(tmp_path: Path) -> None:
     path.write_bytes(b"\xff\xfe\x00garbage")
     assert read_language(path) == "id"
     assert path.exists()
+
+
+# ----- highlight_prompt (design B.4) -------------------------------------------------------
+
+
+def test_highlight_prompt_defaults_to_true(tmp_path: Path) -> None:
+    assert AppSettings().highlight_prompt is True
+    assert SettingsStore(tmp_path / "settings.json", mac=False).load().highlight_prompt is True
+    assert SettingsStore(tmp_path / "mac.json", mac=True).load().highlight_prompt is True
+
+
+def test_file_without_highlight_prompt_gets_true_and_keeps_other_values(tmp_path: Path) -> None:
+    """A settings file written by an older PySSH has no such key."""
+    path = tmp_path / "settings.json"
+    _write(path, {"font_size": 15, "bold_is_bright": False})
+    loaded = SettingsStore(path, mac=False).load()
+    assert loaded.highlight_prompt is True
+    assert loaded == replace(AppSettings(), font_size=15, bold_is_bright=False)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_highlight_prompt_round_trips(tmp_path: Path, value: bool) -> None:
+    path = tmp_path / "settings.json"
+    SettingsStore(path, mac=False).save(replace(AppSettings(), highlight_prompt=value))
+    assert json.loads(path.read_text(encoding="utf-8"))["settings"]["highlight_prompt"] is value
+    assert SettingsStore(path, mac=False).load().highlight_prompt is value
+
+
+@pytest.mark.parametrize("value", [False, True])
+def test_highlight_prompt_loaded_from_json_boolean(tmp_path: Path, value: bool) -> None:
+    path = tmp_path / "settings.json"
+    _write(path, {"highlight_prompt": value})
+    assert SettingsStore(path, mac=False).load().highlight_prompt is value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [0, 1, "false", "true", "no", "", None, 1.0, [], [False], {}],
+)
+def test_highlight_prompt_wrong_type_uses_default_true(tmp_path: Path, value: object) -> None:
+    path = tmp_path / "settings.json"
+    _write(path, {"highlight_prompt": value, "font_size": 15})
+    loaded = SettingsStore(path, mac=False).load()
+    assert loaded.highlight_prompt is True  # also for 0/"false": only a real bool counts
+    assert loaded.font_size == 15  # the rest of the file is still used
+    assert not list(tmp_path.glob("settings.json.corrupt-*"))  # not treated as a broken file
+
+
+def test_highlight_prompt_is_independent_of_other_flags(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    custom = replace(
+        AppSettings(), highlight_prompt=False, bold_is_bright=True, copy_on_select=False
+    )
+    SettingsStore(path, mac=False).save(custom)
+    loaded = SettingsStore(path, mac=False).load()
+    assert (loaded.highlight_prompt, loaded.bold_is_bright, loaded.copy_on_select) == (
+        False,
+        True,
+        False,
+    )
