@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import pyte
 from pyte.screens import Char, Margins
@@ -38,6 +39,12 @@ class _ScrollbackScreen(pyte.Screen):
         self.in_alt_screen = False
         self.scrolled_total = 0  # lines ever added to scrollback (survives deque eviction)
         self._saved_main: tuple[dict, Any] | None = None
+        self._last_graphic = ""  # last character drawn, for REP (CSI n b)
+
+    def draw(self, data: str) -> None:
+        if data:
+            self._last_graphic = data[-1]
+        super().draw(data)
 
     def index(self) -> None:
         top, bottom = self.margins or Margins(0, self.lines - 1)
@@ -48,6 +55,56 @@ class _ScrollbackScreen(pyte.Screen):
             self.scrollback.append(self.buffer[top])
             self.scrolled_total += 1
         super().index()
+
+    # Handlers for SU, SD, REP and CBT. pyte calls ``csi_dispatch[final](*params)`` or, after
+    # ``CSI ?``, ``(*params, private=True)`` with every parameter positional, so each handler
+    # takes ``*params``, uses only the first one and ignores any extra parameters; the private
+    # variant (e.g. XTSMGRAPHICS ``CSI ? Pi ; Pa ; Pv S``) is ignored.
+
+    def scroll_up(self, *params: int, private: bool = False) -> None:
+        """SU (``CSI n S``): scroll the margin region up ``n`` lines; the cursor stays put.
+
+        pyte 0.8.2 has no handler for it, but ncurses (nano) uses it when several keys arrive
+        at once.
+        """
+        if private:
+            return
+        top, bottom = self.margins or Margins(0, self.lines - 1)
+        count = min(max((params[0] if params else 0) or 1, 1), bottom - top + 1)
+        x, y = self.cursor.x, self.cursor.y
+        self.cursor.y = bottom
+        for _ in range(count):
+            self.index()
+        self.cursor.x, self.cursor.y = x, y
+
+    def scroll_down(self, *params: int, private: bool = False) -> None:
+        """SD (``CSI n T``): scroll the margin region down ``n`` lines; the cursor stays put."""
+        if private:
+            return
+        top, bottom = self.margins or Margins(0, self.lines - 1)
+        count = min(max((params[0] if params else 0) or 1, 1), bottom - top + 1)
+        x, y = self.cursor.x, self.cursor.y
+        self.cursor.y = top
+        for _ in range(count):
+            self.reverse_index()
+        self.cursor.x, self.cursor.y = x, y
+
+    def repeat_last_character(self, *params: int, private: bool = False) -> None:
+        """REP (``CSI n b``): draw the last graphic character ``n`` more times."""
+        if private or not self._last_graphic:
+            return
+        count = min(max((params[0] if params else 0) or 1, 1), self.columns * self.lines)
+        self.draw(self._last_graphic * count)
+
+    def cursor_back_tab(self, *params: int, private: bool = False) -> None:
+        """CBT (``CSI n Z``): move the cursor back ``n`` tab stops (column 0 if none is left)."""
+        if private:
+            return
+        for _ in range(max((params[0] if params else 0) or 1, 1)):
+            stops = [stop for stop in self.tabstops if stop < self.cursor.x]
+            self.cursor.x = max(stops, default=0)
+            if self.cursor.x == 0:
+                break
 
     def set_mode(self, *modes: int, **kwargs: Any) -> None:
         if kwargs.get("private") and _ALT_SCREEN_CODES.intersection(modes):
@@ -133,6 +190,37 @@ for _name in _PRIVATE_UNAWARE_HANDLERS:
     setattr(_ScrollbackScreen, _name, _ignore_private_variant(_name))
 
 
+class _Stream(pyte.ByteStream):
+    """``pyte.ByteStream`` that also dispatches SU, SD, REP and CBT.
+
+    pyte builds its CSI dispatcher from ``csi`` when the parser is initialised, so extending
+    the table here is enough; unknown finals are otherwise silently dropped, which left stale
+    lines on screen when nano scrolled with ``CSI n S`` / ``CSI n T``.
+    """
+
+    csi: ClassVar[dict[str, str]] = {
+        **pyte.ByteStream.csi,
+        "S": "scroll_up",
+        "T": "scroll_down",
+        "b": "repeat_last_character",
+        "Z": "cursor_back_tab",
+    }
+    events: ClassVar[frozenset[str]] = pyte.ByteStream.events | frozenset(csi.values())
+
+
+# xterm "greater-than" sequences: ``ESC [ > Pm final`` (vim 9 modifyOtherKeys ``CSI > 4 ; 2 m``,
+# kitty keyboard ``CSI > 1 u``, XTRMTITLE ``CSI > Pm T`` ...). pyte 0.8.2 silently drops the
+# ``>`` and then runs the rest as the plain sequence, so ``CSI > 4 ; 2 m`` became SGR 4;2 (all
+# later text underlined) and ``CSI > Pm T`` became SD. ``TerminalEmulator.feed`` therefore
+# removes them before pyte sees them. Final ``c`` (secondary DA) is left alone: pyte answers it
+# like a primary DA and that behaviour is kept. Parameters are limited to 64 bytes so that a
+# runaway ``ESC [ > 1111...`` cannot make the pending buffer grow without bound.
+_GT_SEQUENCE = re.compile(rb"\x1b\[>[0-9;:]{0,64}[@-bd-~]")
+# Proper prefix of the sequence above that may continue in the next chunk: ``ESC``, ``ESC [``,
+# ``ESC [ >`` and ``ESC [ >`` followed by parameter bytes.
+_GT_PREFIX = re.compile(rb"\x1b(?:\[(?:>[0-9;:]{0,64})?)?")
+
+
 @dataclass(frozen=True)
 class CursorState:
     """Cursor position on the screen (0-based) and visibility."""
@@ -154,7 +242,8 @@ class TerminalEmulator:
     ) -> None:
         """Create a ``cols``×``rows`` screen keeping at most ``scrollback`` history lines."""
         self._screen = _ScrollbackScreen(cols, rows, scrollback, on_response or _noop)
-        self._stream = pyte.ByteStream(self._screen)
+        self._stream = _Stream(self._screen)
+        self._pending = b""  # unfinished ``ESC [ >`` prefix at the end of the last chunk
 
     @property
     def screen(self) -> pyte.Screen:
@@ -220,12 +309,37 @@ class TerminalEmulator:
     def feed(self, data: bytes) -> None:
         """Process bytes; UTF-8 characters split across calls are handled by pyte.
 
+        ``ESC [ > …`` sequences (except secondary DA, final ``c``) are discarded first because
+        pyte drops the ``>`` and would run them as the plain sequence (see ``_GT_SEQUENCE``).
         A parser error never propagates to the GUI; it is logged without the data.
         """
         try:
-            self._stream.feed(data)
+            data = self._strip_gt_csi(data)
+            if data:
+                self._stream.feed(data)
         except Exception as exc:
             log.warning("terminal parser error: %s", type(exc).__name__)
+
+    def _strip_gt_csi(self, data: bytes) -> bytes:
+        """Remove complete ``ESC [ > … final`` sequences; hold back a trailing unfinished one.
+
+        The held prefix is joined with the next chunk, so the result is the same wherever the
+        stream is cut: a chunk boundary alone never makes removal join two fragments. Removal
+        itself can still join bytes in malformed input. When an unterminated ``ESC`` / ``ESC [``
+        is interrupted by a ``CSI >`` sequence, the bytes on both sides of the removed sequence
+        become adjacent (``ESC [ ESC [ > 1 m > 4 ; 2 m`` turns into ``ESC [ > 4 ; 2 m``, which
+        pyte runs as SGR 4;2). That case is known and not guarded against. Everything else is
+        passed on unchanged.
+        """
+        buf = self._pending + data if self._pending else data
+        self._pending = b""
+        cut = buf.rfind(b"\x1b")
+        if cut >= 0 and _GT_PREFIX.fullmatch(buf, cut):
+            self._pending = bytes(buf[cut:])
+            buf = buf[:cut]
+        if b"\x1b[>" in buf:
+            buf = _GT_SEQUENCE.sub(b"", buf)
+        return buf
 
     def resize(self, cols: int, rows: int) -> None:
         """Resize the screen (pyte drops top rows when shrinking)."""

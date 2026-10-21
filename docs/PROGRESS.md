@@ -885,3 +885,194 @@ diperbaiki karena murah: `--version` crash bila direktori home tidak bisa ditent
   Indonesia (`qtbase_id.qm` tidak ada).
 - Nama sesi hasil duplikat memakai akhiran bahasa saat duplikasi dibuat ("(salinan)" / "(copy)");
   nama yang sudah tersimpan tidak diterjemahkan.
+
+## Perbaikan 0.2.1 — Scroll nano — 2026-10-21
+
+**Status:** SELESAI (agent); uji manual MT-S.x menunggu user
+**Gejala:** tampilan nano berantakan (baris lama tertinggal, urutan baris melompat) bila tombol
+Down/Up ditahan; penekanan satu per satu tampil benar.
+**Bukti:** rekaman byte nano 7.2 sungguhan (ncurses, `TERM=xterm-256color`, 80×24, lewat pty).
+
+### Akar masalah (terbukti)
+- Bila beberapa tombol Down/Up tiba sekaligus (tombol ditahan; wajar lewat SSH), ncurses menggulir
+  dengan `CSI n S` (SU, terminfo `indn`) dan `CSI n T` (SD, `rin`) di dalam scroll region
+  (`CSI t;b r`).
+- pyte 0.8.2 tidak punya handler untuk final `S`/`T` (tabel `Stream.csi` hanya
+  `@ABCDEFGHJKLMPXacdefghlmnr`) → perintah diabaikan → baris lama tertinggal. Rekaman: setelah
+  25×(3×Down), baris layar `[2..17, 74, 75, 76]`, seharusnya berurutan.
+- Penekanan satu per satu memakai LF dalam scroll region (sudah benar), itu sebabnya masalah hanya
+  muncul saat tombol ditahan.
+- terminfo yang sama juga mengiklankan `rep=%p1%c\E[%p2%{1}%-%db` (REP, `CSI n b`) dan
+  `cbt=\E[Z` (CBT, `CSI n Z`); keduanya juga tidak ada di pyte. Tidak terlihat dipakai ncurses 6.4
+  pada uji ini, tetapi ditambahkan untuk mencegah masalah serupa.
+- Dispatcher pyte dibuat dari `self.csi` saat parser diinisialisasi
+  (`csi_dispatch = create_dispatcher(self.csi)`) dan varian privat dipanggil dengan
+  `private=True`, sehingga menambah handler cukup lewat subclass `ByteStream` dengan tabel `csi`
+  yang diperluas.
+
+### Yang dikerjakan
+Semua perubahan kode ada di `src/pyssh/terminal/emulator.py`:
+- `_Stream(pyte.ByteStream)` dengan tabel `csi` ditambah `S` → `scroll_up`, `T` → `scroll_down`,
+  `b` → `repeat_last_character`, `Z` → `cursor_back_tab`; `TerminalEmulator` memakainya
+  menggantikan `pyte.ByteStream`.
+- `_ScrollbackScreen.scroll_up` (SU): n = max(parameter pertama atau 1, 1), dibatasi tinggi region.
+  Kursor dipindah ke baris bawah margin (atau layar penuh), `index()` dipanggil n kali, lalu posisi
+  kursor dikembalikan. Akibatnya SU dengan region selayar penuh di layar utama mengisi scrollback
+  sama seperti LF; di alternate screen atau region parsial tidak mengisi scrollback.
+- `scroll_down` (SD): sama, dengan kursor ke baris atas margin dan `reverse_index()` n kali;
+  scrollback tidak disentuh.
+- `repeat_last_character` (REP): mengulang karakter grafis terakhir yang digambar (dicatat oleh
+  override `draw`) sebanyak n, dibatasi `columns * lines`; tanpa karakter sebelumnya → diabaikan.
+- `cursor_back_tab` (CBT): n kali mundur ke tab stop terbesar yang lebih kecil dari kolom kursor,
+  atau kolom 0 bila tidak ada.
+- Varian privat keempatnya (mis. `CSI ? … S` = XTSMGRAPHICS) diabaikan. `dirty` diisi oleh
+  `index`/`reverse_index` pyte; tidak ada perubahan perilaku lain.
+- `TerminalEmulator.feed` membuang urutan `ESC [ > … <final>` sebelum data masuk ke pyte (lihat
+  temuan 2 di bawah).
+- Versi `0.2.1` (`pyproject.toml`, `pyssh.__version__`, test versi yang ada).
+
+### Evaluasi dan tindak lanjut
+Evaluasi terhadap implementasi awal menemukan dua masalah; keduanya sudah diperbaiki.
+
+**1. Tanda tangan handler (tinggi).** pyte memanggil `csi_dispatch[final](*params)` atau
+`(*params, private=True)` dengan semua parameter posisional. Handler awal `(count=None,
+private=False)` membuat parameter ke-2 masuk ke `private`, dan parameter ke-3 (atau `private=True`
+dengan 2 parameter) menimbulkan `TypeError`, sehingga sisa data dalam satu panggilan `feed`
+(termasuk balasan DA/DSR) hilang. Bukti: `\x1b[?1;1;0SAFTER` (XTSMGRAPHICS, `CSI ? Pi ; Pa ; Pv S`)
+tidak menggambar `AFTER`; `\x1b[?2;1;0S\x1b[?1;1;0S\x1b[6n\x1b[c` tidak
+menghasilkan balasan. Perbaikan: keempat handler kini `def nama(self, *params: int, private: bool
+= False)` dan hanya memakai `params[0]` (bila ada); parameter tambahan diabaikan dan varian privat
+tetap diabaikan.
+
+**2. Intermediate `>` (rendah) dan bug lama yang terkait.** Parser pyte 0.8.2 membuang `>` tanpa
+menandai apa pun, sehingga `CSI > Pm T` (xterm XTRMTITLE) akan menjadi SD, dan, **sudah terjadi di
+0.2.0**, `CSI > 4;2 m` (mode keyboard modifyOtherKeys vim 9) dibaca sebagai SGR 4;2 sehingga semua
+teks berikutnya bergaris bawah (terverifikasi pada emulator di HEAD). Perbaikan:
+`TerminalEmulator.feed` membuang setiap urutan `ESC [ > <param> <final>` (param = digit, `;`,
+`:`; final = byte 0x40–0x7E) **kecuali** final `c` (secondary DA, perilaku lama dipertahankan).
+Urutan yang terpotong di akhir chunk (`ESC`, `ESC [`, `ESC [ >` + param) disimpan sebagai sisa dan
+digabung dengan chunk berikutnya, sehingga hasilnya sama untuk pemotongan di byte mana pun; byte
+selain itu diteruskan apa adanya. Pemotongan dilakukan pada byte mentah sebelum pembuangan,
+sehingga batas chunk saja tidak pernah membuat pembuangan menyambung dua potongan. Pada input
+cacat, pembuangan itu sendiri tetap bisa menyambung byte di kedua sisinya: bila `ESC` atau
+`ESC [` yang tidak selesai disela urutan `CSI >`, byte di kiri dan kanan urutan yang dibuang
+menjadi berdekatan (lihat "Masalah yang diketahui"). Parameter dibatasi 64 byte agar
+`ESC [ > 1111…` yang tak berujung tidak membuat sisa membengkak; urutan yang melewati batas itu
+tidak ditahan dan tidak dibuang, melainkan diteruskan ke pyte.
+
+Tindak lanjut lain: fixture nano direkam ulang dengan `tools/record_nano_scroll.py` supaya judul
+nano tidak memuat path lokal (dijaga `test_recordings_carry_no_path_of_the_recording_machine`).
+
+### Test
+Semuanya di `tests/test_emulator_scroll.py` (berkas baru); `tests/test_emulator.py` tidak diubah.
+- **Per sequence**: SU/SD default, n>1, n=0, n lebih besar dari tinggi region, region parsial
+  (baris di luar region tidak berubah), kursor tidak berpindah, scrollback terisi hanya untuk SU
+  selayar penuh di layar utama, `dirty`, varian privat diabaikan; REP (default, karakter terakhir
+  saja, tanpa karakter sebelumnya, non-ASCII, dibatasi ukuran layar); CBT (tab stop bawaan dan
+  kustom, teks dan baris tidak berubah); sequence yang dipotong di beberapa `feed`.
+- **Rekaman nano nyata** (`tests/data/`: `nano_down_batch2.bin`, `nano_down_batch3.bin`,
+  `nano_down_batch5.bin`, `nano_up_batch3.bin`, `nano_down_single.bin`; file yang dibuka nano
+  berisi 300 baris `baris %03d isi teks contoh`): setelah semua byte di-feed ke
+  `TerminalEmulator(80, 24, 1000)`, baris layar 2–21 memuat `baris NNN …` dengan NNN berurutan naik
+  1; bingkai nano utuh; hasil sama untuk berbagai ukuran chunk; rekaman batch memuat SU, rekaman
+  naik memuat SD, rekaman satu-satu menggulir dengan LF. `tools/record_nano_scroll.py` (Linux,
+  butuh nano) membuat ulang fixture.
+- **Parameter berlebih** (temuan 1): `\x1b[?1;1;0S`, `\x1b[?2;1;0S`, `\x1b[?1;2S`,
+  `\x1b[1;2;3;4;5T`, `x\x1b[1;2;3b`, `\x1b[1;2;3Z` diikuti teks dan `\x1b[c` → teks tergambar,
+  balasan DA `\x1b[?6c` keluar, tidak ada log `terminal parser error`; `\x1b[2;5S` menggulir 2
+  baris dan `\x1b[3;1T` menggulir turun 3 baris (hanya parameter pertama yang dipakai).
+- **Intermediate `>`** (temuan 2): `\x1b[>0T`, `\x1b[>3T`, `\x1b[>T` tidak mengubah layar;
+  `\x1b[>4;2mabc` → `abc` tanpa garis bawah; `\x1b[>1u` dan `\x1b[>4;m` tidak meninggalkan efek;
+  `\x1b[>c` dan `\x1b[>0c` tetap dijawab; teks biasa yang diakhiri `ESC` dan dilanjutkan di chunk
+  berikutnya tetap benar; teks sebelum sequence yang belum selesai langsung digambar; hasil sama
+  untuk pemotongan di setiap posisi byte (feed per byte, feed dua potong di setiap titik potong)
+  dan untuk aliran acak.
+- **Batas 64 byte parameter** (tindak lanjut): `ESC [ >` diikuti 81 byte parameter yang dikirim
+  per 7 byte → sisa (`_pending`) tidak pernah lebih dari 3 + 64 byte, sama dengan awalan + parameter
+  selama parameter ≤ 64 byte, dan kosong begitu parameter melewati 64 byte; setelah final `m`
+  urutan itu sampai ke pyte (teks berikutnya bergaris bawah). Pada setiap titik potong, urutan
+  dengan 1, 63, dan 64 byte parameter dibuang, sedangkan 65 dan 66 byte diteruskan.
+
+**Bukti terhadap implementasi awal.** Emulator awal direkonstruksi dengan mengembalikan perbaikan
+1 dan 2 pada salinan `emulator.py` (handler `(count=None, private=False)`, tanpa `_strip_gt_csi`),
+lalu ditukar masuk lewat plugin pytest sementara di luar repo. Hasil pada `tests/test_emulator_scroll.py`
+dan `tests/test_emulator.py`: **43 gagal, 178 lulus**. Semua test lama di kedua berkas tetap lulus;
+yang gagal hanya test baru:
+- teks dan balasan hilang dengan log `terminal parser error: TypeError` (6 sequence berparameter
+  berlebih, `XTSMGRAPHICS` sebelum permintaan status, 8 varian privat berparameter banyak);
+- SU/SD/REP/CBT yang hanya memakai parameter pertama (`\x1b[2;5S` tidak melakukan apa pun karena
+  parameter ke-2 masuk ke `private`);
+- `>`: `XTRMTITLE` menggulir (3), modifyOtherKeys menggarisbawahi teks, sequence `>` yang belum
+  selesai dilengkapi chunk berikutnya, `>` yang dibuang bersama yang dijawab, dan hanya `>` yang
+  dibuang; `test_gt_sequence_is_discarded_at_every_cut` gagal untuk 11 dari 16 set parameter
+  (`>0T`, `>3T`, `>T`, `>4;2m`, `>4:2m`, `>4;1;2;…;9m`, `>2S`, `>2J`, `>2K`, `>3A`, `>1;1H`);
+- independensi terhadap pemotongan chunk (`test_stream_with_escape_sequences_is_independent_of_chunking`
+  dan `test_random_streams_are_independent_of_chunking`).
+
+Test yang lulus juga pada implementasi awal (perilaku tidak berubah) berfungsi sebagai penjaga
+regresi: balasan `>c` dan `>0c`, `>1u` dan `>4;m` tanpa efek, teks biasa yang diakhiri `ESC`, teks
+sebelum sequence yang belum selesai, dan `ESC` sendirian dalam satu chunk.
+
+### Quality Gate
+Dijalankan pada working tree yang juga memuat pekerjaan 0.3.0 (ada perubahan lain yang belum
+di-commit), sehingga jumlah test di bawah **bukan** jumlah untuk commit 0.2.1 saja; baris
+bertanda "tree 0.2.1 saja" diverifikasi terpisah di git worktree sebelum commit, sedangkan baris
+lainnya berasal dari working tree gabungan.
+
+| Cek | Hasil |
+|---|---|
+| ruff check (`src tests tools`), tree 0.2.1 saja | All checks passed |
+| ruff format --check, tree 0.2.1 saja | 79 file sudah terformat |
+| pytest (unit, `-m "not integration"`), tree 0.2.1 saja | 895 lulus, 20 di-deselect, 0 gagal |
+| ruff check (`src tests tools`) | 0 error ("All checks passed!") |
+| ruff format --check | lulus (81 file) |
+| pytest (unit, `-m "not integration"`) | 1065 lulus, 20 di-deselect (integrasi) |
+| pytest (integration) | password unik `secret-Z9q7-unique`: **20 lulus**, tanpa skip |
+| pytest (seluruh suite, agen testing), working tree gabungan | 1084 lulus, 1 dilewati |
+
+### Checklist manual (diisi user)
+- [ ] MT-S.1 Di server nyata buka nano pada file panjang (ratusan baris), tahan Down lalu Up →
+  baris layar tetap berurutan, tidak ada baris lama yang tertinggal. — OS: — hasil:
+- [ ] MT-S.2 Jalankan vim 9 (yang mengaktifkan mode keyboard `CSI > 4 ; 2 m`), ketik teks lalu
+  keluar → teks tidak bergaris bawah. — OS: — hasil:
+
+### Penyimpangan & keputusan
+- Handler SU/SD/REP/CBT memakai `*params`, hanya membaca parameter pertama, dan mengabaikan
+  parameter tambahan, bukan `count`, karena pyte memanggil handler dengan semua parameter posisional.
+- `CSI > … c` (secondary DA) sengaja tidak dibuang: pyte menjawabnya seperti DA biasa dan perilaku
+  itu dipertahankan.
+- REP dan CBT ditambahkan sebagai pencegahan; tidak terlihat dipakai ncurses 6.4 pada uji ini.
+- Test integrasi: `ss` tidak terpasang di mesin ini, sehingga listener `sshd` di port 2222
+  dipastikan lewat `pgrep -a sshd` dan `/proc/net/tcp` (port 08AE dalam state LISTEN); tidak ada
+  `sshd` kedua yang dijalankan. Password user `tester` diganti sementara menjadi
+  `secret-Z9q7-unique` dengan `chpasswd` untuk audit secret (lihat Fase 5), lalu dikembalikan ke
+  `secret`.
+
+### Masalah yang diketahui
+- Perilaku nano di desktop dan server nyata hanya bisa dipastikan lewat MT-S.1; rekaman uji dibuat
+  dengan nano 7.2 lewat pty.
+- Bukti terhadap implementasi awal memakai salinan emulator dan plugin pytest sementara di luar
+  repo; keduanya tidak disimpan di repo.
+- Keterbatasan pyte 0.8.2 berikut sudah ada sebelum 0.2.1 dan **tidak diubah** di 0.2.1. Setiap
+  contoh diverifikasi pada emulator saat ini (`TerminalEmulator(30, 4, 10)`). Untuk dua poin
+  pertama, `pyte.Screen` + `pyte.ByteStream` polos memberi hasil yang sama (final digambar, atau
+  `TypeError` yang langsung dilempar):
+  - `CSI <` dan `CSI =`: pyte tidak mengenali intermediate `<` dan `=`, sehingga byte final urutan
+    itu digambar sebagai teks biasa. `ESC[<u` menampilkan `u`, `ESC[=c` menampilkan `c` (dan tidak
+    dijawab sebagai DA); `A\x1b[<uB` menampilkan `AuB`.
+  - Bentuk berparameter banyak dari handler pyte berarti tetap (argumen posisional yang tidak
+    cocok) menimbulkan `TypeError`. `TerminalEmulator.feed` menangkapnya dan mencatat
+    `terminal parser error: TypeError` (tanpa data), tetapi sisa data dalam chunk itu hilang:
+    `ESC[>1;2c`, `ESC[4;2;3H`, `ESC[4;2a` (cursor_forward), dan `ESC[4;2n` (report_device_status)
+    masing-masing diikuti `AFTER` tidak menggambar `AFTER`; teks sebelum urutan itu dalam chunk
+    yang sama tetap tergambar, dan chunk berikutnya diproses normal. `ESC[4;2H` (dua parameter)
+    tidak terpengaruh karena `cursor_position` memang menerima dua parameter. `ESC[>c` dan
+    `ESC[>0c` tetap dijawab (`ESC[?6c`); hanya bentuk `ESC[>1;2c` yang gagal, karena `c` sengaja
+    tidak dibuang oleh filter `>`.
+  - Urutan cacat yang sudah dijelaskan di bagian temuan 2: `ESC[` yang tidak selesai disela
+    `CSI >` menyambung byte di kedua sisi. Contoh: `TerminalEmulator(30, 4, 10).feed(
+    b"\x1b[\x1b[>1m>4;2mabc")` menampilkan `abc` bergaris bawah, karena setelah `ESC[>1m` dibuang
+    sisanya menjadi `ESC[>4;2mabc`, yang dibaca pyte sebagai SGR 4;2. Hasilnya sama untuk
+    pemotongan chunk di posisi mana pun (diperiksa untuk contoh ini: satu chunk, per byte, dan dua
+    potongan di setiap titik); syaratnya hanya `ESC` atau `ESC [` yang tidak selesai disela
+    `CSI >`. Tidak diperbaiki di 0.2.1.

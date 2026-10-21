@@ -2,6 +2,23 @@
 
 Semua perubahan penting pada PySSH dicatat di file ini.
 
+## [0.2.1] — 2026-10-21
+
+### Diperbaiki
+- **Tampilan nano (dan program lain berbasis ncurses yang menggulir dengan perintah yang sama)
+  berantakan saat tombol panah ditahan**: baris lama tertinggal dan urutan baris melompat. Bila
+  beberapa penekanan tombol tiba sekaligus (wajar lewat SSH), ncurses menggulir layar dengan
+  perintah `CSI n S` (SU) dan `CSI n T` (SD) di dalam scroll region; pyte 0.8.2 tidak mengenal
+  keduanya sehingga perintah itu diabaikan. Kini keduanya didukung, begitu pula `CSI n b` (REP) dan
+  `CSI n Z` (CBT) yang diiklankan terminfo `xterm-256color`. Penyebabnya terbukti dengan rekaman
+  nano 7.2 sungguhan; rekaman itu kini menjadi test regresi (`tests/data/`, dibuat ulang dengan
+  `tools/record_nano_scroll.py`).
+- **Urutan `CSI > …` tidak lagi membuat teks bergaris bawah**: vim 9 mengaktifkan mode keyboard
+  dengan `CSI > 4 ; 2 m`, tetapi pyte 0.8.2 membuang tanda `>` lalu membacanya sebagai SGR 4;2
+  sehingga semua teks sesudahnya bergaris bawah (masalah ini sudah ada di 0.2.0). Urutan
+  `CSI > … <final>` kini dibuang sebelum sampai ke pyte, juga bila terpotong di antara dua paket
+  data; `CSI > c` (secondary device attributes) tetap dijawab seperti sebelumnya.
+
 ## [0.2.0] — 2026-10-10
 
 ### Ditambahkan
