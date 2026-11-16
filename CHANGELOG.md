@@ -2,11 +2,6 @@
 
 Semua perubahan penting pada PySSH dicatat di file ini.
 
-## [Belum dirilis]
-
-### Ditambahkan
-- README: langkah mengambil source code (git clone atau zip) dan memperbarui ke versi baru.
-
 ## [0.3.0] — 2026-11-16
 
 ### Ditambahkan
@@ -23,6 +18,8 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   - Pengaturan **Warnai prompt shell (user@host:path)** di **Berkas → Pengaturan…**, default aktif,
     berlaku langsung di tab yang sedang terbuka.
 - Pengaturan `highlight_prompt` di `settings.json` (`true`/`false`; nilai lain → `true`).
+- README: instalasi dan pembaruan lewat halaman Releases; cara memakai git dipindah ke bagian
+  Pengembangan.
 
 ### Diperbaiki
 - **Seleksi dengan drag kini menggulir otomatis** bila pointer melewati tepi atas atau bawah area

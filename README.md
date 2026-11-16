@@ -29,28 +29,21 @@ Spesifikasi lengkap: [`docs/SPEC.md`](docs/SPEC.md). Laporan per fase:
   - Lingkungan tanpa layar (container/CI) juga butuh `libegl1` dan minimal satu font monospace
     (mis. `fonts-dejavu-core`).
 
-## Instalasi (dari source)
+## Instalasi
 
-### Mengambil source code
-
-Dengan git (disarankan, memudahkan pembaruan):
-
-```bash
-git clone https://github.com/luthfy13/py-ssh-man.git
-cd py-ssh-man
-```
-
-Tanpa git: unduh **Source code (zip)** dari halaman Releases
-(`https://github.com/luthfy13/py-ssh-man/releases`), ekstrak, lalu masuk ke folder hasil ekstrak.
-
-Lalu buat virtual environment dan pasang:
+1. Buka halaman Releases (`https://github.com/luthfy13/py-ssh-man/releases`), pilih rilis
+   bertanda **Latest**, lalu unduh **Source code (zip)** di bagian *Assets*.
+2. Ekstrak; hasilnya folder seperti `py-ssh-man-0.3.0` yang berisi `pyproject.toml`. Buka
+   terminal di folder itu. Di Windows, **Extract All** bisa menghasilkan folder ganda
+   (`py-ssh-man-0.3.0\py-ssh-man-0.3.0`); pakai folder bagian dalam.
+3. Buat virtual environment dan pasang.
 
 Windows (PowerShell):
 
 ```powershell
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"     # atau: pip install .   (tanpa alat pengembangan)
+pip install .
 ```
 
 Linux / macOS:
@@ -58,8 +51,11 @@ Linux / macOS:
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"     # atau: pip install .
+pip install .
 ```
+
+Perintah `pip install -e ".[dev]"` (mode editable dengan alat pengembangan) hanya untuk
+pengembangan; lihat bagian [Pengembangan](#pengembangan).
 
 ## Memperbarui ke versi baru
 
@@ -67,22 +63,14 @@ pip install -e ".[dev]"     # atau: pip install .
    [Folder data](#folder-data). Bila versi baru mengubah format database, versi lama tidak bisa
    lagi membukanya (muncul pesan "Database tidak didukung" lalu aplikasi keluar), jadi cadangan
    dibutuhkan bila ingin kembali ke versi lama.
-2. Ambil versi baru:
-   - Dengan git (di folder source): untuk versi terbaru jalankan `git checkout main` lalu
-     `git pull` (`git checkout main` perlu bila sebelumnya checkout ke tag, karena `git pull`
-     gagal pada detached HEAD). Untuk versi tertentu: `git fetch --tags` lalu
-     `git checkout v0.3.0` (ganti dengan tag yang diinginkan; daftarnya ada di halaman Releases).
-   - Tanpa git: unduh **Source code (zip)** versi baru, ekstrak ke folder baru (namanya
-     seperti `py-ssh-man-0.2.0`), lalu ulangi langkah Instalasi di folder itu (buat venv dan
-     `pip install`). Folder lama boleh dihapus setelah versi baru berjalan.
-3. Pasang ulang di venv yang aktif (Windows: `.venv\Scripts\Activate.ps1`; Linux/macOS:
-   `source .venv/bin/activate`): `pip install -e ".[dev]"` (atau `pip install .`).
-   - Pada instalasi `pip install .`, langkah ini wajib setiap pembaruan.
-   - Pada instalasi `-e`, kode baru langsung terpakai, tetapi langkah ini tetap perlu bila
-     dependensi berubah; aman untuk selalu dijalankan.
+2. Unduh **Source code (zip)** rilis terbaru dari halaman Releases dan ekstrak ke folder baru
+   (mis. `py-ssh-man-0.4.0`, folder yang berisi `pyproject.toml`).
+3. Di folder baru, ulangi langkah 3 [Instalasi](#instalasi): buat venv baru lalu `pip install .`.
+   Venv lama tidak perlu dipindah.
 4. Cek versi: `python -m pyssh --version`.
-5. Data (sesi, password tersimpan, pengaturan) tidak ikut tertimpa karena berada di folder data.
-   Perubahan tiap versi ada di [CHANGELOG.md](CHANGELOG.md).
+5. Setelah versi baru berjalan, folder versi lama boleh dihapus. Data (sesi, password tersimpan,
+   pengaturan) tetap ada karena berada di folder data. Perubahan tiap versi ada di
+   [CHANGELOG.md](CHANGELOG.md).
 
 ## Menjalankan
 
@@ -174,6 +162,22 @@ Batasan:
 Kombinasi Ctrl lainnya (Ctrl+C, Ctrl+D, Ctrl+R, Ctrl+W, …) selalu dikirim ke server.
 
 ## Pengembangan
+
+### Menyiapkan dari git
+
+```bash
+git clone https://github.com/luthfy13/py-ssh-man.git
+cd py-ssh-man
+python3.12 -m venv .venv        # Windows: py -3.12 -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+```
+
+Catatan: `main` berisi pengembangan terbaru yang belum tentu sudah dirilis; untuk kode rilis
+tertentu jalankan `git checkout v0.3.0` (ganti dengan tag yang diinginkan). Untuk memperbarui:
+`git checkout main` lalu `git pull` (`git checkout main` perlu bila sebelumnya berada di tag,
+karena `git pull` gagal pada detached HEAD), lalu `pip install -e ".[dev]"` bila dependensi
+berubah.
 
 ### Quality Gate
 
