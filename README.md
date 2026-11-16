@@ -31,6 +31,20 @@ Spesifikasi lengkap: [`docs/SPEC.md`](docs/SPEC.md). Laporan per fase:
 
 ## Instalasi (dari source)
 
+### Mengambil source code
+
+Dengan git (disarankan, memudahkan pembaruan):
+
+```bash
+git clone https://github.com/luthfy13/py-ssh-man.git
+cd py-ssh-man
+```
+
+Tanpa git: unduh **Source code (zip)** dari halaman Releases
+(`https://github.com/luthfy13/py-ssh-man/releases`), ekstrak, lalu masuk ke folder hasil ekstrak.
+
+Lalu buat virtual environment dan pasang:
+
 Windows (PowerShell):
 
 ```powershell
@@ -46,6 +60,29 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"     # atau: pip install .
 ```
+
+## Memperbarui ke versi baru
+
+1. Tutup PySSH, lalu (disarankan) salin folder data sebagai cadangan; lokasinya ada di tabel
+   [Folder data](#folder-data). Bila versi baru mengubah format database, versi lama tidak bisa
+   lagi membukanya (muncul pesan "Database tidak didukung" lalu aplikasi keluar), jadi cadangan
+   dibutuhkan bila ingin kembali ke versi lama.
+2. Ambil versi baru:
+   - Dengan git (di folder source): untuk versi terbaru jalankan `git checkout main` lalu
+     `git pull` (`git checkout main` perlu bila sebelumnya checkout ke tag, karena `git pull`
+     gagal pada detached HEAD). Untuk versi tertentu: `git fetch --tags` lalu
+     `git checkout v0.3.0` (ganti dengan tag yang diinginkan; daftarnya ada di halaman Releases).
+   - Tanpa git: unduh **Source code (zip)** versi baru, ekstrak ke folder baru (namanya
+     seperti `py-ssh-man-0.2.0`), lalu ulangi langkah Instalasi di folder itu (buat venv dan
+     `pip install`). Folder lama boleh dihapus setelah versi baru berjalan.
+3. Pasang ulang di venv yang aktif (Windows: `.venv\Scripts\Activate.ps1`; Linux/macOS:
+   `source .venv/bin/activate`): `pip install -e ".[dev]"` (atau `pip install .`).
+   - Pada instalasi `pip install .`, langkah ini wajib setiap pembaruan.
+   - Pada instalasi `-e`, kode baru langsung terpakai, tetapi langkah ini tetap perlu bila
+     dependensi berubah; aman untuk selalu dijalankan.
+4. Cek versi: `python -m pyssh --version`.
+5. Data (sesi, password tersimpan, pengaturan) tidak ikut tertimpa karena berada di folder data.
+   Perubahan tiap versi ada di [CHANGELOG.md](CHANGELOG.md).
 
 ## Menjalankan
 

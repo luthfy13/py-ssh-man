@@ -2,6 +2,11 @@
 
 Semua perubahan penting pada PySSH dicatat di file ini.
 
+## [Belum dirilis]
+
+### Ditambahkan
+- README: langkah mengambil source code (git clone atau zip) dan memperbarui ke versi baru.
+
 ## [0.3.0] — 2026-11-16
 
 ### Ditambahkan
