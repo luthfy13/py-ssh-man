@@ -2,7 +2,7 @@
 
 Semua perubahan penting pada PySSH dicatat di file ini.
 
-## [0.3.0] — 2026-10-21
+## [0.3.0] — 2026-11-16
 
 ### Ditambahkan
 - **Pewarnaan prompt shell**: prompt di awal baris dikenali dan diwarnai saat digambar —
@@ -18,6 +18,13 @@ Semua perubahan penting pada PySSH dicatat di file ini.
   - Pengaturan **Warnai prompt shell (user@host:path)** di **Berkas → Pengaturan…**, default aktif,
     berlaku langsung di tab yang sedang terbuka.
 - Pengaturan `highlight_prompt` di `settings.json` (`true`/`false`; nilai lain → `true`).
+
+### Diperbaiki
+- **Seleksi dengan drag kini menggulir otomatis** bila pointer melewati tepi atas atau bawah area
+  teks (sebelumnya seleksi berhenti di baris yang terlihat dan tampilan tidak bergerak). Makin jauh
+  pointer dari tepi, makin cepat gulirnya (maksimum 10 baris per 50 ms); awal seleksi tetap, ujung
+  seleksi ikut memanjang. Gulir berhenti saat pointer kembali ke area teks, tombol dilepas, seleksi
+  hilang (mis. karena output baru), atau batas riwayat/tampilan live tercapai.
 
 ## [0.2.1] — 2026-10-21
 

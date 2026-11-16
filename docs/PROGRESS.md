@@ -1247,3 +1247,98 @@ Dijalankan pada working tree 0.3.0 (HEAD `9f1ba87` + fitur ini + versi 0.3.0).
 - Selama aplikasi layar penuh terbuka, prompt di scrollback juga tidak diwarnai (evaluasi, temuan 1).
 - Angka paint hanya dari pengukuran offscreen; belum ada pengukuran di desktop nyata. Perilaku di
   server nyata hanya bisa dipastikan lewat MT-P.1 sampai MT-P.3.
+
+### Tambahan 2026-11-16 — Auto-scroll saat seleksi
+
+**Masalah (terbukti).** Uji langsung `TerminalWidget` offscreen (grid 76×22, 179 baris riwayat):
+menekan di baris 5 lalu drag jauh melewati tepi bawah membuat seleksi berhenti di baris terakhir
+yang terlihat, `view_offset` tetap 0; drag melewati tepi atas juga berhenti di baris teratas yang
+terlihat, `view_offset` tetap 0. Penyebab: `mouseMoveEvent` hanya memanggil `_boundary_at`, yang
+menjepit baris ke area terlihat, tanpa auto-scroll. Roda mouse sambil menahan tombol sudah menggulir
+(di luar cakupan).
+
+**Perbaikan** (`src/pyssh/terminal/widget.py`). Konstanta `AUTOSCROLL_INTERVAL_MS = 50` dan
+`AUTOSCROLL_MAX_LINES = 10`; `QTimer` milik widget (`_autoscroll_timer`). Saat drag dengan pointer di
+atas tepi atas atau di bawah tepi bawah area teks, setiap tik menggulir
+`min(1 + int(jarak // cell_h), AUTOSCROLL_MAX_LINES)` baris, lalu `_sel_end` diperbarui ke
+`_boundary_at` posisi pointer terakhir; `_sel_anchor` tidak berubah. Sumbu X tidak menggulir. Perilaku lain (seleksi hilang saat output baru,
+roda mouse) tidak berubah.
+
+Berhenti: gulir berhenti di batas (`view_offset` = panjang riwayat saat ke atas, 0 saat ke bawah);
+tik di batas tidak memanggil `scroll_by`/`update`, sehingga tidak ada `scroll_state_changed` lagi,
+tetapi timer tetap aktif sampai pointer masuk kembali ke area teks, tombol dilepas, atau drag
+berakhir.
+
+**Temuan evaluasi putaran 1 dan perbaikannya (putaran 2).**
+1. Auto-scroll hanya selama seleksi ada. Bukti sebelum perbaikan: output baru di tengah drag
+   (`_after_feed` mengosongkan `_sel_anchor/_sel_end`) membuat timer tetap jalan, `view_offset` 10
+   menjadi 28 dalam 300 ms tanpa seleksi; `clear_selection` di tengah drag lalu pointer ke luar lagi
+   menggulir 0 menjadi 18 dengan timer aktif. Perbaikan: kecepatan 0 bila `_sel_anchor is None`, dan
+   tik menghentikan timer bila `_sel_anchor is None`. Sesudahnya: 13 ke 13 dengan timer berhenti
+   (output baru), 0 ke 0 dengan timer berhenti (`clear_selection`).
+2. Drag diakhiri sebelum menu klik kanan dan saat widget disembunyikan atau kehilangan fokus.
+   Bukti sebelum perbaikan: menu klik kanan dibuka saat auto-scroll, `_dragging` tetap True
+   (pelepasan tombol diambil popup) dan offset 20 menjadi 40 setelah menu ditutup; setelah `hide()`
+   timer memancarkan 6 `scroll_state_changed`. Perbaikan: `_end_drag()` (set `_dragging` False,
+   hentikan auto-scroll) dipanggil dari `contextMenuEvent` (sebelum `exec`), `focusOutEvent`, dan
+   `hideEvent` baru. Sesudahnya: offset 4 ke 4 setelah menu ditutup, timer dan `_dragging` False;
+   0 emit setelah `hide()`.
+3. Tidak ada kerja di batas gulir: 10 emit `scroll_state_changed` dalam 500 ms di batas riwayat
+   sebelum perbaikan, 0 sesudahnya (timer tetap aktif di batas).
+
+**Test.** `tests/test_widget_autoscroll.py`, 27 test (putaran 1: 15; putaran 2: +8 = 23; putaran 3: +4 = 27). Putaran 1:
+konstanta modul; drag melewati tepi atas ke riwayat (baris terseleksi berurutan, anchor tetap);
+drag melewati tepi bawah dari tampilan yang digulir; batas riwayat dan batas bawah; kecepatan
+(pointer lebih jauh menggulir lebih banyak baris per tik, maksimum 10); berhenti saat pointer masuk
+kembali, saat tombol dilepas, dan saat `clear_selection`; gerak mouse tanpa tombol tidak menggulir;
+regresi drag biasa, double-click kata, dan copy-on-select setelah auto-scroll. Putaran 2 (8 test):
+output baru di tengah drag; `clear_selection` di tengah drag lalu pointer ke luar lagi; `hide`;
+`contextMenuEvent` (popup ditutup lewat `QTimer.singleShot` yang memeriksa
+`QApplication.activePopupWidget()`); tidak ada emit `scroll_state_changed` di batas riwayat; hal yang
+sama di dasar live; batas tepi bawah `>=` (pointer tepat di tepi menggulir); pointer 1 px di dalam
+tepi bawah tidak menggulir. Putaran 3 (4 test): (1) dua test pengaman tik, yaitu
+`test_tick_guard_stops_when_selection_vanishes_without_move` (feed + flush tanpa gerak lanjutan) dan
+`test_tick_guard_itself_stops_timer_when_anchor_is_gone` (mengisi `term._sel_anchor = None` langsung,
+tanpa `clear_selection` yang menghentikan timer sendiri, sebagai pengaman berlapis; skenario feed +
+flush pada test pertama juga mencapai pengaman tik karena `_after_feed` mengosongkan seleksi tanpa
+memanggil `clear_selection`); (2) `test_focus_out_to_sibling_ends_drag_and_autoscroll` (induk tampil
+berisi `TerminalWidget` dan `QLineEdit`, `setFocus` ke edit, lalu `_dragging` False, timer tidak
+aktif, dan `view_offset` stabil selama 8 tik); (3) `test_hide_event_alone_ends_drag_and_autoscroll`
+(`QApplication.sendEvent(term, QHideEvent())` tanpa perubahan fokus). Test menu klik kanan tidak
+berubah; komentar di file mencatat bahwa test itu tumpang tindih dengan penanganan focus-out
+(popup menu selalu mengambil fokus, sehingga `focusOutEvent` juga mengakhiri drag dan test tidak
+dapat mengisolasi `_end_drag()` milik `contextMenuEvent`). Test memakai `qtbot.waitUntil` (batas 10
+detik) atau membandingkan setelah keadaan stabil, tanpa hitungan tik yang bergantung waktu; dua test
+kecepatan menghentikan timer lalu memicu satu tik lewat `term._autoscroll_timer.timeout.emit()`.
+
+Bukti test (angka run putaran 3, seluruh file 27 test):
+- Widget saat ini (base): 27 lulus.
+- Mutan, seluruh file: `tick_guard` GAGAL (2 test baru); `focus_none` GAGAL (test fokus baru);
+  `hide_none` GAGAL (test hide baru); `gt` GAGAL (`test_bottom_edge_boundary_is_inclusive`); `limit`
+  GAGAL (2 test `no_scroll_state_emits`); `move_guard` GAGAL (2 test). `clear_none`, `menu_none`, dan
+  `menu_after` tetap LULUS (selamat), terkait tumpang tindih menu dengan focus-out di atas.
+- Widget putaran 1 (`round1w/widget_round1.py`, tanpa perbaikan putaran 2): 10 gagal, 17 lulus (6
+  test lama ditambah 4 test baru).
+- Widget HEAD ditambah konstanta (`oldshim`): gagal sejak test pertama karena HEAD tidak punya timer
+  (`test_drag_above_top_scrolls_into_history` kena batas waktu `waitUntil`). Seluruh file tidak
+  dijalankan terhadap widget ini.
+- Widget saat ini: `tests/test_widget_autoscroll.py` bersama `tests/test_widget.py` menghasilkan
+  109 lulus.
+
+**Quality Gate** (dijalankan; sshd lokal port 2222, user `tester`).
+
+| Cek | Hasil |
+|---|---|
+| ruff check (`src tests tools`) | All checks passed! |
+| ruff format --check (`src tests tools`) | 82 file sudah terformat |
+| pytest (unit, `-m "not integration"`) | 1098 lulus, 20 di-deselect |
+| pytest (integration) | 20 lulus, 1098 di-deselect, tanpa skip |
+| pytest --collect-only `tests/test_widget_autoscroll.py` | 27 test terkumpul |
+
+**Checklist manual (diisi user)**
+- [ ] MT-P.4 Blok teks dengan drag lalu terus drag melewati tepi atas, kemudian tepi bawah, area
+  terminal → layar menggulir dan seleksi ikut memanjang; makin jauh pointer makin cepat; berhenti saat
+  pointer kembali ke area teks atau tombol dilepas. — OS: — hasil:
+
+**Evaluasi.** Perubahan hanya di `widget.py` dan tidak menyentuh emulator, teks salinan, atau data
+yang dikirim ke server. Perilaku di desktop nyata hanya bisa dipastikan lewat MT-P.4.

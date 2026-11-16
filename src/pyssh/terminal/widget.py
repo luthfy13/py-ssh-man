@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QFontDatabase,
     QFontMetricsF,
     QGuiApplication,
+    QHideEvent,
     QInputMethodEvent,
     QKeyEvent,
     QKeySequence,
@@ -62,6 +63,9 @@ WHEEL_NOTCH = 120
 WHEEL_LINES_PER_NOTCH = 3
 PERF_TICK_MS = 100
 PERF_REPORT_S = 5.0
+# Drag-selection auto-scroll: tick period and the cap on lines scrolled per tick.
+AUTOSCROLL_INTERVAL_MS = 50
+AUTOSCROLL_MAX_LINES = 10
 WORD_SEPARATORS = frozenset(" \t\"'()[]{}<>;,|")
 
 FONT_FALLBACKS = {
@@ -160,6 +164,8 @@ class TerminalWidget(QWidget):
         self._sel_anchor: tuple[int, int] | None = None
         self._sel_end: tuple[int, int] | None = None
         self._dragging = False
+        self._autoscroll_lines = 0
+        self._last_drag_pos: QPointF | None = None
         self._wheel_acc = 0.0
         self._pixel_acc = 0.0
         self._title = ""
@@ -174,6 +180,9 @@ class TerminalWidget(QWidget):
         self._repaint_timer.setSingleShot(True)
         self._repaint_timer.setInterval(REPAINT_INTERVAL_MS)
         self._repaint_timer.timeout.connect(self.update)
+        self._autoscroll_timer = QTimer(self)
+        self._autoscroll_timer.setInterval(AUTOSCROLL_INTERVAL_MS)
+        self._autoscroll_timer.timeout.connect(self._autoscroll_tick)
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(RESIZE_DEBOUNCE_MS)
@@ -288,6 +297,7 @@ class TerminalWidget(QWidget):
 
     def clear_selection(self) -> None:
         """Remove the selection."""
+        self._stop_autoscroll()
         if self._sel_anchor is not None or self._sel_end is not None:
             self._sel_anchor = self._sel_end = None
             self.update()
@@ -589,9 +599,15 @@ class TerminalWidget(QWidget):
         self.update()
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
-        """Redraw the cursor as an outline."""
+        """Redraw the cursor as an outline; end any drag in progress."""
+        self._end_drag()
         super().focusOutEvent(event)
         self.update()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """End any drag in progress when the widget is hidden."""
+        self._end_drag()
+        super().hideEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Start a selection."""
@@ -612,10 +628,63 @@ class TerminalWidget(QWidget):
             return
         super().mousePressEvent(event)
 
+    def _end_drag(self) -> None:
+        """Abandon a drag in progress (no more auto-scrolling)."""
+        self._dragging = False
+        self._stop_autoscroll()
+
+    def _stop_autoscroll(self) -> None:
+        """Stop drag auto-scrolling."""
+        self._autoscroll_timer.stop()
+        self._autoscroll_lines = 0
+
+    def _autoscroll_speed(self, y: float) -> int:
+        """Lines per tick for pointer ``y``: positive up, negative down, 0 inside the text."""
+        top = PADDING
+        bottom = PADDING + self._emulator.rows * self._cell_h
+        if y < top:
+            distance, sign = top - y, 1
+        elif y >= bottom:
+            distance, sign = y - bottom, -1
+        else:
+            return 0
+        return sign * min(1 + int(distance // self._cell_h), AUTOSCROLL_MAX_LINES)
+
+    def _autoscroll_tick(self) -> None:
+        """Scroll while the pointer is outside the text and extend the selection."""
+        if (
+            not self._dragging
+            or self._sel_anchor is None
+            or not self._autoscroll_lines
+            or self._last_drag_pos is None
+        ):
+            self._stop_autoscroll()
+            return
+        at_limit = (
+            self._view_offset >= self._emulator.history_len
+            if self._autoscroll_lines > 0
+            else self._view_offset <= 0
+        )
+        if at_limit:
+            return
+        self.scroll_by(self._autoscroll_lines)
+        self._sel_end = self._boundary_at(self._last_drag_pos)
+        self.update()
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Extend the selection while dragging."""
         if self._dragging:
-            self._sel_end = self._boundary_at(event.position())
+            pos = event.position()
+            self._last_drag_pos = pos
+            self._autoscroll_lines = (
+                self._autoscroll_speed(pos.y()) if self._sel_anchor is not None else 0
+            )
+            if self._autoscroll_lines:
+                if not self._autoscroll_timer.isActive():
+                    self._autoscroll_timer.start()
+            else:
+                self._autoscroll_timer.stop()
+            self._sel_end = self._boundary_at(pos)
             self.update()
             event.accept()
             return
@@ -625,6 +694,7 @@ class TerminalWidget(QWidget):
         """Finish the selection; copy it when ``copy_on_select`` is on."""
         if event.button() == Qt.MouseButton.LeftButton and self._dragging:
             self._dragging = False
+            self._stop_autoscroll()
             if self.has_selection():
                 if self._settings.copy_on_select:
                     self.copy_selection()
@@ -642,6 +712,7 @@ class TerminalWidget(QWidget):
             line_index, col = self._cell_at(event.position())
             start, end = self._word_bounds(line_index, col)
             self._dragging = False
+            self._stop_autoscroll()
             self.set_selection((line_index, start), (line_index, end))
             if self._settings.copy_on_select:
                 self.copy_selection()
@@ -653,6 +724,7 @@ class TerminalWidget(QWidget):
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         """Show copy/paste/clear-scrollback."""
+        self._end_drag()
         self.context_menu().exec(event.globalPos())
 
     def wheelEvent(self, event: QWheelEvent) -> None:
